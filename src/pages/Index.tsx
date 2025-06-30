@@ -1,102 +1,57 @@
-
 import { Search, Play, FileText, Globe, Clock, User, Star } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 const Index = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
-
-  // Mock data for demonstration
-  const mockResults = {
-    videos: [
-      {
-        id: 1,
-        title: "Complete Guide to Machine Learning",
-        summary: "A comprehensive overview of machine learning concepts, algorithms, and practical applications. Perfect for beginners starting their ML journey.",
-        duration: "15:32",
-        author: "Tech Academy",
-        thumbnail: "/placeholder.svg",
-        source: "YouTube"
-      },
-      {
-        id: 2,
-        title: "Python for Data Science Tutorial",
-        summary: "Learn Python programming specifically for data science applications, including pandas, numpy, and visualization libraries.",
-        duration: "22:45",
-        author: "Data Science Pro",
-        thumbnail: "/placeholder.svg",
-        source: "YouTube"
-      },
-      {
-        id: 3,
-        title: "AI Ethics and Responsible Development",
-        summary: "Exploring the ethical implications of AI development and how to build responsible AI systems in today's world.",
-        duration: "18:20",
-        author: "AI Ethics Institute",
-        thumbnail: "/placeholder.svg",
-        source: "YouTube"
-      }
-    ],
-    blogs: [
-      {
-        id: 4,
-        title: "Understanding Neural Networks: A Beginner's Guide",
-        summary: "A detailed explanation of how neural networks work, their architecture, and real-world applications in modern AI systems.",
-        author: "Dr. Sarah Johnson",
-        publishDate: "2024-01-15",
-        readTime: "8 min read",
-        source: "Medium"
-      },
-      {
-        id: 5,
-        title: "The Future of Artificial Intelligence",
-        summary: "An in-depth analysis of AI trends, emerging technologies, and their potential impact on various industries.",
-        author: "AI Research Lab",
-        publishDate: "2024-01-10",
-        readTime: "12 min read",
-        source: "TechBlog"
-      }
-    ],
-    websites: [
-      {
-        id: 6,
-        title: "MIT OpenCourseWare: Introduction to AI",
-        summary: "Free online course materials from MIT covering fundamental AI concepts, algorithms, and problem-solving techniques.",
-        author: "MIT",
-        type: "Course",
-        source: "MIT OCW"
-      },
-      {
-        id: 7,
-        title: "Google AI Education Hub",
-        summary: "Interactive learning resources, tutorials, and hands-on exercises for understanding AI and machine learning concepts.",
-        author: "Google",
-        type: "Interactive",
-        source: "Google AI"
-      }
-    ]
-  };
+  const { toast } = useToast();
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
     
     setIsSearching(true);
-    // Simulate API call
-    setTimeout(() => {
-      setSearchResults(mockResults);
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('search-content', {
+        body: { query: searchQuery }
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      setSearchResults(data);
+      toast({
+        title: "Search completed!",
+        description: `Found content about "${searchQuery}"`,
+      });
+    } catch (error) {
+      console.error('Search error:', error);
+      toast({
+        title: "Search failed",
+        description: "Please try again later",
+        variant: "destructive",
+      });
+    } finally {
       setIsSearching(false);
-    }, 1500);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
       handleSearch();
     }
+  };
+
+  const handleOpenContent = (url: string) => {
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const ContentCard = ({ item, type }: { item: any; type: 'video' | 'blog' | 'website' }) => {
@@ -147,14 +102,17 @@ const Index = () => {
                 <span>{item.duration}</span>
               </div>
             )}
-            {item.readTime && (
+            {item.metadata?.readTime && (
               <div className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                <span>{item.readTime}</span>
+                <span>{item.metadata.readTime}</span>
               </div>
             )}
           </div>
-          <Button className="w-full mt-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700">
+          <Button 
+            className="w-full mt-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            onClick={() => handleOpenContent(item.url)}
+          >
             Open
           </Button>
         </CardContent>
@@ -236,36 +194,36 @@ const Index = () => {
         {searchResults && (
           <div className="space-y-12">
             {/* Videos Section */}
-            {searchResults.videos.length > 0 && (
+            {searchResults.videos && searchResults.videos.length > 0 && (
               <section>
                 <SectionHeader title="Videos" count={searchResults.videos.length} />
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.videos.map((video: any) => (
-                    <ContentCard key={video.id} item={video} type="video" />
+                  {searchResults.videos.map((video: any, index: number) => (
+                    <ContentCard key={`video-${index}`} item={video} type="video" />
                   ))}
                 </div>
               </section>
             )}
 
             {/* Blogs Section */}
-            {searchResults.blogs.length > 0 && (
+            {searchResults.blogs && searchResults.blogs.length > 0 && (
               <section>
                 <SectionHeader title="Blogs" count={searchResults.blogs.length} />
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.blogs.map((blog: any) => (
-                    <ContentCard key={blog.id} item={blog} type="blog" />
+                  {searchResults.blogs.map((blog: any, index: number) => (
+                    <ContentCard key={`blog-${index}`} item={blog} type="blog" />
                   ))}
                 </div>
               </section>
             )}
 
             {/* Websites Section */}
-            {searchResults.websites.length > 0 && (
+            {searchResults.websites && searchResults.websites.length > 0 && (
               <section>
                 <SectionHeader title="Websites" count={searchResults.websites.length} />
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.websites.map((website: any) => (
-                    <ContentCard key={website.id} item={website} type="website" />
+                  {searchResults.websites.map((website: any, index: number) => (
+                    <ContentCard key={`website-${index}`} item={website} type="website" />
                   ))}
                 </div>
               </section>

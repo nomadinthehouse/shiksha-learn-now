@@ -9,13 +9,87 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      content_items: {
+        Row: {
+          author: string | null
+          content_type: string
+          created_at: string
+          duration: string | null
+          id: string
+          metadata: Json | null
+          publish_date: string | null
+          source: string
+          summary: string | null
+          thumbnail_url: string | null
+          title: string
+          url: string
+        }
+        Insert: {
+          author?: string | null
+          content_type: string
+          created_at?: string
+          duration?: string | null
+          id?: string
+          metadata?: Json | null
+          publish_date?: string | null
+          source: string
+          summary?: string | null
+          thumbnail_url?: string | null
+          title: string
+          url: string
+        }
+        Update: {
+          author?: string | null
+          content_type?: string
+          created_at?: string
+          duration?: string | null
+          id?: string
+          metadata?: Json | null
+          publish_date?: string | null
+          source?: string
+          summary?: string | null
+          thumbnail_url?: string | null
+          title?: string
+          url?: string
+        }
+        Relationships: []
+      }
+      search_cache: {
+        Row: {
+          content_type: string
+          created_at: string
+          expires_at: string
+          id: string
+          query: string
+          results: Json
+        }
+        Insert: {
+          content_type: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          query: string
+          results: Json
+        }
+        Update: {
+          content_type?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          query?: string
+          results?: Json
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      clean_expired_cache: {
+        Args: Record<PropertyKey, never>
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
