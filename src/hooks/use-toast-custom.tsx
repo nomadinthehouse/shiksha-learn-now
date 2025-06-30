@@ -7,26 +7,16 @@ export const useCustomToast = () => {
 
   const showSuccess = (message: string) => {
     toast({
-      title: (
-        <div className="flex items-center gap-2">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <span>Success</span>
-        </div>
-      ),
+      title: "Success",
       description: message,
-      className: "top-4 right-4 fixed max-w-sm",
+      className: "top-4 right-4 fixed max-w-sm border-green-200 bg-green-50",
       variant: "default",
     });
   };
 
   const showError = (message: string) => {
     toast({
-      title: (
-        <div className="flex items-center gap-2">
-          <XCircle className="h-4 w-4 text-red-600" />
-          <span>Error</span>
-        </div>
-      ),
+      title: "Error",
       description: message,
       className: "top-4 right-4 fixed max-w-sm",
       variant: "destructive",
