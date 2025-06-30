@@ -10,6 +10,7 @@ import { useCustomToast } from "@/hooks/use-toast-custom";
 import { AuthProvider, useAuth } from "@/components/auth/AuthContext";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { YoutubeModal } from "@/components/ui/youtube-modal";
+import { FloatingChat } from "@/components/ui/floating-chat";
 
 const IndexContent = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -26,7 +27,10 @@ const IndexContent = () => {
   const { user, loading, signOut } = useAuth();
 
   const handleSearch = async () => {
-    if (!searchQuery.trim()) return;
+    if (!searchQuery.trim()) {
+      showError("Please enter a search query to find educational content.");
+      return;
+    }
     
     setIsSearching(true);
     
@@ -91,8 +95,8 @@ const IndexContent = () => {
     };
 
     return (
-      <Card className="h-full hover:shadow-lg transition-all duration-300 hover:scale-105 cursor-pointer border-0 shadow-md">
-        <CardHeader className="pb-3">
+      <Card className="h-full hover:shadow-lg transition-all duration-300 hover:scale-105 cursor-pointer border-0 shadow-md flex flex-col">
+        <CardHeader className="pb-3 flex-shrink-0">
           <div className="flex items-center justify-between mb-2">
             <Badge className={`${getTypeColor()} text-xs`}>
               {getIcon()}
@@ -113,8 +117,8 @@ const IndexContent = () => {
             </div>
           )}
         </CardHeader>
-        <CardContent>
-          <CardDescription className="text-sm mb-4 line-clamp-3">
+        <CardContent className="flex flex-col flex-grow">
+          <CardDescription className="text-sm mb-4 line-clamp-3 flex-grow">
             {item.summary}
           </CardDescription>
           {item.learningTopics && item.learningTopics.length > 0 && (
@@ -145,7 +149,7 @@ const IndexContent = () => {
             )}
           </div>
           <Button 
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 mt-auto"
             onClick={() => handleOpenContent(item.url, item)}
           >
             {type === 'video' ? 'Watch' : 'Open'}
@@ -273,18 +277,6 @@ const IndexContent = () => {
               </section>
             )}
 
-            {/* Blogs Section */}
-            {searchResults.blogs && searchResults.blogs.length > 0 && (
-              <section>
-                <SectionHeader title="Blogs" count={searchResults.blogs.length} />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.blogs.map((blog: any, index: number) => (
-                    <ContentCard key={`blog-${index}`} item={blog} type="blog" />
-                  ))}
-                </div>
-              </section>
-            )}
-
             {/* Websites Section */}
             {searchResults.websites && searchResults.websites.length > 0 && (
               <section>
@@ -292,6 +284,18 @@ const IndexContent = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {searchResults.websites.map((website: any, index: number) => (
                     <ContentCard key={`website-${index}`} item={website} type="website" />
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {/* Blogs Section */}
+            {searchResults.blogs && searchResults.blogs.length > 0 && (
+              <section>
+                <SectionHeader title="Blogs" count={searchResults.blogs.length} />
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {searchResults.blogs.map((blog: any, index: number) => (
+                    <ContentCard key={`blog-${index}`} item={blog} type="blog" />
                   ))}
                 </div>
               </section>
@@ -330,6 +334,9 @@ const IndexContent = () => {
           </div>
         )}
       </div>
+
+      {/* Floating Chat - only show on search results page */}
+      {searchResults && <FloatingChat searchContext={searchQuery} />}
 
       <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
       <YoutubeModal 

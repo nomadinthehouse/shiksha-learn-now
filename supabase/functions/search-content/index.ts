@@ -1,3 +1,4 @@
+
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.2'
 import { corsHeaders } from '../_shared/cors.ts'
 
@@ -114,7 +115,8 @@ async function enhanceWithAI(results: any, query: string) {
             title: item.title,
             description: item.summary || '',
             query: query,
-            contentType: item.contentType
+            contentType: item.contentType,
+            duration: item.duration
           }
         });
 
@@ -134,17 +136,68 @@ async function enhanceWithAI(results: any, query: string) {
     })
   );
 
-  // Filter out non-educational content and sort by relevance
+  // Enhanced filtering with better content quality checks
   const filteredContent = enhancedContent
-    .filter(item => item.isEducational !== false && (item.relevanceScore || 0) >= 30)
-    .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+    .filter(item => {
+      // Base educational filter
+      if (item.isEducational === false) return false;
+      
+      // Relevance score filter
+      if ((item.relevanceScore || 0) < 30) return false;
+      
+      // Duration-based quality filter for videos
+      if (item.contentType === 'video' && item.duration) {
+        const durationInSeconds = parseDurationToSeconds(item.duration);
+        // Filter out very short videos (less than 2 minutes for educational content)
+        if (durationInSeconds < 120) return false;
+        // Also filter out extremely long videos (more than 2 hours) unless highly relevant
+        if (durationInSeconds > 7200 && (item.relevanceScore || 0) < 70) return false;
+      }
+      
+      return true;
+    })
+    .sort((a, b) => {
+      // Sort by relevance score, but give slight preference to longer educational videos
+      let scoreA = a.relevanceScore || 0;
+      let scoreB = b.relevanceScore || 0;
+      
+      if (a.contentType === 'video' && a.duration) {
+        const durationA = parseDurationToSeconds(a.duration);
+        if (durationA >= 300 && durationA <= 3600) { // 5 minutes to 1 hour sweet spot
+          scoreA += 5;
+        }
+      }
+      
+      if (b.contentType === 'video' && b.duration) {
+        const durationB = parseDurationToSeconds(b.duration);
+        if (durationB >= 300 && durationB <= 3600) {
+          scoreB += 5;
+        }
+      }
+      
+      return scoreB - scoreA;
+    });
 
   // Redistribute back to categories
   return {
     videos: filteredContent.filter(item => item.contentType === 'video'),
-    blogs: filteredContent.filter(item => item.contentType === 'blog'),
-    websites: filteredContent.filter(item => item.contentType === 'website')
+    websites: filteredContent.filter(item => item.contentType === 'website'),
+    blogs: filteredContent.filter(item => item.contentType === 'blog')
   };
+}
+
+function parseDurationToSeconds(duration: string): number {
+  if (!duration) return 0;
+  
+  // Handle formats like "15:32" or "1:23:45"
+  const parts = duration.split(':').map(part => parseInt(part));
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1]; // minutes:seconds
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2]; // hours:minutes:seconds
+  }
+  
+  return 0;
 }
 
 async function checkCache(query: string) {
@@ -182,17 +235,12 @@ async function storeResultsInCache(query: string, results: any) {
 }
 
 async function fetchYouTubeVideos(query: string): Promise<ContentItem[]> {
-  const youtubeApiKey = Deno.env.get('YOUTUBE_API_KEY');
+  const youtubeApiKey = 'AIzaSyCIiIDThXh54iApplzIcodomiVDDFGcTJs';
   
-  if (!youtubeApiKey) {
-    console.log('YouTube API key not found, returning mock data');
-    return getMockVideos(query);
-  }
-
   try {
-    // First, search for videos
+    // First, search for videos with more specific educational keywords
     const searchResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query + ' tutorial educational learning')}&type=video&maxResults=10&order=relevance&key=${youtubeApiKey}`
+      `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query + ' tutorial educational learning course explained')}&type=video&maxResults=15&order=relevance&videoDuration=medium&key=${youtubeApiKey}`
     );
 
     if (!searchResponse.ok) {
@@ -229,6 +277,8 @@ async function fetchYouTubeVideos(query: string): Promise<ContentItem[]> {
     return searchData.items
       .map((item: any) => {
         const stats = statsMap.get(item.id.videoId);
+        const duration = formatDuration(stats?.duration);
+        
         return {
           title: item.snippet.title,
           url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
@@ -237,7 +287,7 @@ async function fetchYouTubeVideos(query: string): Promise<ContentItem[]> {
           author: item.snippet.channelTitle,
           source: 'YouTube',
           publish_date: item.snippet.publishedAt,
-          duration: formatDuration(stats?.duration),
+          duration: duration,
           metadata: {
             videoId: item.id.videoId,
             channelId: item.snippet.channelId,
@@ -246,8 +296,16 @@ async function fetchYouTubeVideos(query: string): Promise<ContentItem[]> {
           }
         };
       })
+      .filter((video: any) => {
+        // Pre-filter very short videos
+        if (video.duration) {
+          const durationInSeconds = parseDurationToSeconds(video.duration);
+          return durationInSeconds >= 120; // At least 2 minutes
+        }
+        return true;
+      })
       .sort((a: any, b: any) => (b.metadata.viewCount + b.metadata.likeCount) - (a.metadata.viewCount + a.metadata.likeCount))
-      .slice(0, 6);
+      .slice(0, 8);
 
   } catch (error) {
     console.error('YouTube fetch error:', error);

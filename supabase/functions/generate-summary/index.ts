@@ -1,13 +1,14 @@
 
 import { corsHeaders } from '../_shared/cors.ts'
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+const OPENAI_API_KEY = 'AIzaSyD5lQVVwgciGV8WPumcHfHzaXid3It5bdM';
 
 interface SummaryRequest {
   title: string;
   description?: string;
   query: string;
   contentType: 'video' | 'blog' | 'website';
+  duration?: string;
 }
 
 interface SummaryResponse {
@@ -23,7 +24,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { title, description = '', query, contentType }: SummaryRequest = await req.json();
+    const { title, description = '', query, contentType, duration }: SummaryRequest = await req.json();
 
     if (!OPENAI_API_KEY) {
       return new Response(
@@ -35,16 +36,29 @@ Deno.serve(async (req) => {
       );
     }
 
+    let qualityNote = '';
+    if (contentType === 'video' && duration) {
+      const durationInSeconds = parseDurationToSeconds(duration);
+      if (durationInSeconds < 120) {
+        qualityNote = ' (Note: This is a very short video, consider if it provides sufficient educational depth)';
+      } else if (durationInSeconds >= 300 && durationInSeconds <= 3600) {
+        qualityNote = ' (Good duration for educational content)';
+      }
+    }
+
     const prompt = `Analyze this ${contentType} content for educational value and relevance to the search query "${query}".
 
 Title: ${title}
 Description: ${description}
+${duration ? `Duration: ${duration}` : ''}${qualityNote}
 
 Please provide:
 1. A concise educational summary (2-3 sentences) explaining what the learner will gain
-2. Whether this content is genuinely educational (true/false)
-3. Relevance score to the search query (0-100)
+2. Whether this content is genuinely educational and valuable for learning (true/false)
+3. Relevance score to the search query (0-100) - be strict, only high-quality educational content should score above 70
 4. Key learning topics covered (array of topics)
+
+For videos: Prefer content that is substantial enough for learning (typically 2+ minutes). Very short videos should generally score lower unless they are exceptionally valuable.
 
 Respond in JSON format:
 {
@@ -61,11 +75,11 @@ Respond in JSON format:
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-4o-mini',
         messages: [
           {
             role: 'system',
-            content: 'You are an educational content analyst. Provide accurate, helpful assessments of learning materials.'
+            content: 'You are an educational content analyst. Provide accurate, helpful assessments of learning materials. Be strict about educational quality - prioritize substantial, well-structured learning content.'
           },
           {
             role: 'user',
@@ -126,3 +140,17 @@ Respond in JSON format:
     );
   }
 });
+
+function parseDurationToSeconds(duration: string): number {
+  if (!duration) return 0;
+  
+  // Handle formats like "15:32" or "1:23:45"
+  const parts = duration.split(':').map(part => parseInt(part));
+  if (parts.length === 2) {
+    return parts[0] * 60 + parts[1]; // minutes:seconds
+  } else if (parts.length === 3) {
+    return parts[0] * 3600 + parts[1] * 60 + parts[2]; // hours:minutes:seconds
+  }
+  
+  return 0;
+}
