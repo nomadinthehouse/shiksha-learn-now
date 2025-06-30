@@ -1,4 +1,3 @@
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.2'
 import { corsHeaders } from '../_shared/cors.ts'
 
@@ -33,10 +32,13 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  console.log('Search content function called');
+
   try {
     const { query, userId }: SearchRequest = await req.json();
     
     if (!query || query.trim().length === 0) {
+      console.error('Empty query received');
       return new Response(
         JSON.stringify({ error: 'Query parameter is required' }),
         { 
@@ -61,6 +63,7 @@ Deno.serve(async (req) => {
     }
 
     // Fetch content from multiple sources concurrently
+    console.log('Fetching content from multiple sources');
     const [videos, blogs, websites] = await Promise.allSettled([
       fetchYouTubeVideos(query),
       fetchBlogArticles(query),
@@ -73,13 +76,15 @@ Deno.serve(async (req) => {
       websites: websites.status === 'fulfilled' ? websites.value : []
     };
 
+    console.log(`Raw results: ${results.videos.length} videos, ${results.blogs.length} blogs, ${results.websites.length} websites`);
+
     // Apply AI filtering and enhancement
     results = await enhanceWithAI(results, query);
 
     // Cache the results
     await storeResultsInCache(query, results);
 
-    console.log(`Found ${results.videos.length} videos, ${results.blogs.length} blogs, ${results.websites.length} websites`);
+    console.log(`Final results: ${results.videos.length} videos, ${results.blogs.length} blogs, ${results.websites.length} websites`);
 
     return new Response(
       JSON.stringify(results),
@@ -101,15 +106,20 @@ Deno.serve(async (req) => {
 });
 
 async function enhanceWithAI(results: any, query: string) {
+  console.log('Starting AI enhancement of content');
+  
   const allContent = [
     ...results.videos.map((item: any) => ({ ...item, contentType: 'video' })),
     ...results.blogs.map((item: any) => ({ ...item, contentType: 'blog' })),
     ...results.websites.map((item: any) => ({ ...item, contentType: 'website' }))
   ];
 
+  console.log(`Processing ${allContent.length} items for AI enhancement`);
+
   const enhancedContent = await Promise.all(
     allContent.map(async (item) => {
       try {
+        console.log(`Enhancing item: ${item.title}`);
         const response = await supabase.functions.invoke('generate-summary', {
           body: {
             title: item.title,
@@ -121,6 +131,7 @@ async function enhanceWithAI(results: any, query: string) {
         });
 
         if (response.data && !response.error) {
+          console.log(`Enhanced item successfully: ${item.title}`);
           return {
             ...item,
             summary: response.data.summary,
@@ -128,9 +139,11 @@ async function enhanceWithAI(results: any, query: string) {
             relevanceScore: response.data.relevanceScore,
             learningTopics: response.data.learningTopics
           };
+        } else {
+          console.error(`Enhancement failed for ${item.title}:`, response.error);
         }
       } catch (error) {
-        console.error('AI enhancement error:', error);
+        console.error('AI enhancement error for item:', item.title, error);
       }
       return item;
     })
@@ -140,18 +153,30 @@ async function enhanceWithAI(results: any, query: string) {
   const filteredContent = enhancedContent
     .filter(item => {
       // Base educational filter
-      if (item.isEducational === false) return false;
+      if (item.isEducational === false) {
+        console.log(`Filtered out non-educational: ${item.title}`);
+        return false;
+      }
       
       // Relevance score filter
-      if ((item.relevanceScore || 0) < 30) return false;
+      if ((item.relevanceScore || 0) < 30) {
+        console.log(`Filtered out low relevance (${item.relevanceScore}): ${item.title}`);
+        return false;
+      }
       
       // Duration-based quality filter for videos
       if (item.contentType === 'video' && item.duration) {
         const durationInSeconds = parseDurationToSeconds(item.duration);
         // Filter out very short videos (less than 2 minutes for educational content)
-        if (durationInSeconds < 120) return false;
+        if (durationInSeconds < 120) {
+          console.log(`Filtered out short video (${item.duration}): ${item.title}`);
+          return false;
+        }
         // Also filter out extremely long videos (more than 2 hours) unless highly relevant
-        if (durationInSeconds > 7200 && (item.relevanceScore || 0) < 70) return false;
+        if (durationInSeconds > 7200 && (item.relevanceScore || 0) < 70) {
+          console.log(`Filtered out long video with low relevance: ${item.title}`);
+          return false;
+        }
       }
       
       return true;
@@ -177,6 +202,8 @@ async function enhanceWithAI(results: any, query: string) {
       
       return scoreB - scoreA;
     });
+
+  console.log(`Filtered down to ${filteredContent.length} high-quality items`);
 
   // Redistribute back to categories
   return {
@@ -235,23 +262,33 @@ async function storeResultsInCache(query: string, results: any) {
 }
 
 async function fetchYouTubeVideos(query: string): Promise<ContentItem[]> {
-  const youtubeApiKey = 'AIzaSyCIiIDThXh54iApplzIcodomiVDDFGcTJs';
+  const youtubeApiKey = Deno.env.get('YOUTUBE_API_KEY');
+  
+  if (!youtubeApiKey) {
+    console.error('YouTube API key not configured');
+    return getMockVideos(query);
+  }
   
   try {
+    console.log('Fetching YouTube videos');
     // First, search for videos with more specific educational keywords
     const searchResponse = await fetch(
       `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query + ' tutorial educational learning course explained')}&type=video&maxResults=15&order=relevance&videoDuration=medium&key=${youtubeApiKey}`
     );
 
     if (!searchResponse.ok) {
+      console.error(`YouTube API error: ${searchResponse.status}`);
       throw new Error(`YouTube API error: ${searchResponse.status}`);
     }
 
     const searchData = await searchResponse.json();
     
     if (!searchData.items || searchData.items.length === 0) {
+      console.log('No YouTube videos found, returning mock data');
       return getMockVideos(query);
     }
+
+    console.log(`Found ${searchData.items.length} YouTube videos`);
 
     // Get video IDs for statistics
     const videoIds = searchData.items.map((item: any) => item.id.videoId).join(',');

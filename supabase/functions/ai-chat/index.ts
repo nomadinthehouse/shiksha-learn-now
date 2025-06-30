@@ -1,7 +1,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts'
 
-const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
 interface ChatRequest {
   message: string;
@@ -13,12 +13,15 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  console.log('AI Chat function called');
+
   try {
     const { message, context }: ChatRequest = await req.json();
 
-    if (!OPENAI_API_KEY) {
+    if (!GEMINI_API_KEY) {
+      console.error('Gemini API key not configured');
       return new Response(
-        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        JSON.stringify({ error: 'Gemini API key not configured' }),
         { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -26,45 +29,58 @@ Deno.serve(async (req) => {
       );
     }
 
-    const systemPrompt = `You are an educational AI assistant. Help users understand topics they're learning about. 
+    const systemPrompt = `You are an educational AI assistant. Help users understand topics they're learning about in a structured, interactive way.
     ${context ? `The user is currently learning about: ${context}` : ''}
     
-    Provide clear, concise, and helpful explanations. Break down complex topics into digestible parts.
-    Always encourage learning and provide additional resources when relevant.`;
+    IMPORTANT GUIDELINES:
+    - Provide clear, concise explanations in a structured format
+    - Break down complex topics into digestible parts
+    - Use numbered lists, bullet points, or step-by-step explanations
+    - Ask follow-up questions to keep the conversation interactive
+    - Focus only on what the user asked - don't overwhelm with too much information at once
+    - Encourage deeper learning by suggesting related questions they might want to explore
+    - Keep responses focused and relevant to their specific question`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    console.log('Calling Gemini API for chat response');
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
+        contents: [
           {
-            role: 'system',
-            content: systemPrompt
-          },
-          {
-            role: 'user',
-            content: message
+            parts: [
+              {
+                text: `${systemPrompt}\n\nUser question: ${message}`
+              }
+            ]
           }
         ],
-        max_tokens: 500,
-        temperature: 0.7,
+        generationConfig: {
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 500,
+        }
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+      console.error(`Gemini API error: ${response.status}`);
+      throw new Error(`Gemini API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const aiResponse = data.choices[0]?.message?.content;
+    const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!aiResponse) {
-      throw new Error('No response received from OpenAI');
+      console.error('No response received from Gemini');
+      throw new Error('No response received from Gemini');
     }
+
+    console.log('Chat response generated successfully');
 
     return new Response(
       JSON.stringify({ response: aiResponse }),

@@ -1,7 +1,7 @@
 
 import { corsHeaders } from '../_shared/cors.ts'
 
-const OPENAI_API_KEY = 'AIzaSyD5lQVVwgciGV8WPumcHfHzaXid3It5bdM';
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
 interface SummaryRequest {
   title: string;
@@ -23,12 +23,15 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  console.log('Generate summary function called');
+
   try {
     const { title, description = '', query, contentType, duration }: SummaryRequest = await req.json();
 
-    if (!OPENAI_API_KEY) {
+    if (!GEMINI_API_KEY) {
+      console.error('Gemini API key not configured');
       return new Response(
-        JSON.stringify({ error: 'OpenAI API key not configured' }),
+        JSON.stringify({ error: 'Gemini API key not configured' }),
         { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -68,45 +71,56 @@ Respond in JSON format:
   "learningTopics": ["topic1", "topic2"]
 }`;
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    console.log('Calling Gemini API for content analysis');
+
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [
+        contents: [
           {
-            role: 'system',
-            content: 'You are an educational content analyst. Provide accurate, helpful assessments of learning materials. Be strict about educational quality - prioritize substantial, well-structured learning content.'
-          },
-          {
-            role: 'user',
-            content: prompt
+            parts: [
+              {
+                text: `You are an educational content analyst. Provide accurate, helpful assessments of learning materials. Be strict about educational quality - prioritize substantial, well-structured learning content.\n\n${prompt}`
+              }
+            ]
           }
         ],
-        max_tokens: 300,
-        temperature: 0.3,
+        generationConfig: {
+          temperature: 0.3,
+          topK: 40,
+          topP: 0.95,
+          maxOutputTokens: 300,
+        }
       }),
     });
 
     if (!response.ok) {
-      throw new Error(`OpenAI API error: ${response.status}`);
+      console.error(`Gemini API error: ${response.status}`);
+      throw new Error(`Gemini API error: ${response.status}`);
     }
 
     const data = await response.json();
-    const content = data.choices[0]?.message?.content;
+    const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
     if (!content) {
-      throw new Error('No content received from OpenAI');
+      console.error('No content received from Gemini');
+      throw new Error('No content received from Gemini');
     }
+
+    console.log('Gemini response received, parsing JSON');
 
     // Parse the JSON response
     let analysisResult: SummaryResponse;
     try {
-      analysisResult = JSON.parse(content);
+      // Clean the response to extract JSON
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      const jsonString = jsonMatch ? jsonMatch[0] : content;
+      analysisResult = JSON.parse(jsonString);
     } catch (parseError) {
+      console.error('JSON parsing failed, using fallback:', parseError);
       // Fallback if JSON parsing fails
       analysisResult = {
         summary: `Learn about ${title} - educational content covering key concepts and practical applications.`,
@@ -115,6 +129,8 @@ Respond in JSON format:
         learningTopics: [query]
       };
     }
+
+    console.log('Analysis completed successfully');
 
     return new Response(
       JSON.stringify(analysisResult),
