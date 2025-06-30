@@ -1,4 +1,3 @@
-
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.2'
 import { corsHeaders } from '../_shared/cors.ts'
 
@@ -46,11 +45,11 @@ Deno.serve(async (req) => {
     console.log(`Searching for: ${query}`);
 
     // Check cache first
-    const cacheResults = await checkCache(query);
-    if (cacheResults) {
+    const cachedResults = await checkCache(query);
+    if (cachedResults) {
       console.log('Returning cached results');
       return new Response(
-        JSON.stringify(cacheResults),
+        JSON.stringify(cachedResults),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
@@ -71,7 +70,7 @@ Deno.serve(async (req) => {
     };
 
     // Cache the results
-    await cacheResults(query, results);
+    await storeResultsInCache(query, results);
 
     console.log(`Found ${results.videos.length} videos, ${results.blogs.length} blogs, ${results.websites.length} websites`);
 
@@ -100,7 +99,7 @@ async function checkCache(query: string) {
       .from('search_cache')
       .select('results')
       .eq('query', query.toLowerCase())
-      .gt('expires_at', 'now()')
+      .gt('expires_at', new Date().toISOString())
       .single();
 
     if (error || !data) {
@@ -114,7 +113,7 @@ async function checkCache(query: string) {
   }
 }
 
-async function cacheResults(query: string, results: any) {
+async function storeResultsInCache(query: string, results: any) {
   try {
     await supabase
       .from('search_cache')
