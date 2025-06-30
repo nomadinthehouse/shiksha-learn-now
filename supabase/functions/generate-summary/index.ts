@@ -1,16 +1,20 @@
 
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.2'
 import { corsHeaders } from '../_shared/cors.ts'
 
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-)
+const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 
 interface SummaryRequest {
-  content: string;
   title: string;
-  type: 'video' | 'blog' | 'website';
+  description?: string;
+  query: string;
+  contentType: 'video' | 'blog' | 'website';
+}
+
+interface SummaryResponse {
+  summary: string;
+  isEducational: boolean;
+  relevanceScore: number;
+  learningTopics: string[];
 }
 
 Deno.serve(async (req) => {
@@ -19,45 +23,57 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { content, title, type }: SummaryRequest = await req.json();
-    
-    const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
-    
-    if (!openaiApiKey) {
-      // Return a basic summary if no API key
+    const { title, description = '', query, contentType }: SummaryRequest = await req.json();
+
+    if (!OPENAI_API_KEY) {
       return new Response(
-        JSON.stringify({ 
-          summary: `This ${type} covers important concepts related to ${title}. It provides educational content that can help you understand the topic better.`
-        }),
+        JSON.stringify({ error: 'OpenAI API key not configured' }),
         { 
+          status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
       );
     }
 
-    const prompt = `Summarize this ${type} content in 2-3 sentences for educational purposes. Focus on key learning points and concepts covered.
+    const prompt = `Analyze this ${contentType} content for educational value and relevance to the search query "${query}".
 
 Title: ${title}
-Content: ${content}
+Description: ${description}
 
-Provide a clear, educational summary:`;
+Please provide:
+1. A concise educational summary (2-3 sentences) explaining what the learner will gain
+2. Whether this content is genuinely educational (true/false)
+3. Relevance score to the search query (0-100)
+4. Key learning topics covered (array of topics)
+
+Respond in JSON format:
+{
+  "summary": "Educational summary here",
+  "isEducational": true/false,
+  "relevanceScore": number,
+  "learningTopics": ["topic1", "topic2"]
+}`;
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${openaiApiKey}`,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         model: 'gpt-3.5-turbo',
         messages: [
           {
+            role: 'system',
+            content: 'You are an educational content analyst. Provide accurate, helpful assessments of learning materials.'
+          },
+          {
             role: 'user',
             content: prompt
           }
         ],
-        max_tokens: 150,
-        temperature: 0.7,
+        max_tokens: 300,
+        temperature: 0.3,
       }),
     });
 
@@ -66,10 +82,28 @@ Provide a clear, educational summary:`;
     }
 
     const data = await response.json();
-    const summary = data.choices[0]?.message?.content || 'Summary not available';
+    const content = data.choices[0]?.message?.content;
+
+    if (!content) {
+      throw new Error('No content received from OpenAI');
+    }
+
+    // Parse the JSON response
+    let analysisResult: SummaryResponse;
+    try {
+      analysisResult = JSON.parse(content);
+    } catch (parseError) {
+      // Fallback if JSON parsing fails
+      analysisResult = {
+        summary: `Learn about ${title} - educational content covering key concepts and practical applications.`,
+        isEducational: true,
+        relevanceScore: 75,
+        learningTopics: [query]
+      };
+    }
 
     return new Response(
-      JSON.stringify({ summary }),
+      JSON.stringify(analysisResult),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
@@ -78,7 +112,13 @@ Provide a clear, educational summary:`;
   } catch (error) {
     console.error('Summary generation error:', error);
     return new Response(
-      JSON.stringify({ error: 'Failed to generate summary' }),
+      JSON.stringify({ 
+        error: 'Failed to generate summary',
+        summary: 'Educational content available for learning.',
+        isEducational: true,
+        relevanceScore: 50,
+        learningTopics: []
+      }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }

@@ -1,17 +1,29 @@
-import { Search, Play, FileText, Globe, Clock, User, Star } from "lucide-react";
+
+import { Search, Play, FileText, Globe, Clock, User, Star, LogOut } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
-import { useToast } from "@/hooks/use-toast";
+import { useCustomToast } from "@/hooks/use-toast-custom";
+import { AuthProvider, useAuth } from "@/components/auth/AuthContext";
+import { AuthModal } from "@/components/auth/AuthModal";
+import { YoutubeModal } from "@/components/ui/youtube-modal";
 
-const Index = () => {
+const IndexContent = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const { toast } = useToast();
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [youtubeModal, setYoutubeModal] = useState<{isOpen: boolean, videoId: string, title: string}>({
+    isOpen: false,
+    videoId: '',
+    title: ''
+  });
+  
+  const { showSuccess, showError } = useCustomToast();
+  const { user, loading, signOut } = useAuth();
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) return;
@@ -20,7 +32,10 @@ const Index = () => {
     
     try {
       const { data, error } = await supabase.functions.invoke('search-content', {
-        body: { query: searchQuery }
+        body: { 
+          query: searchQuery,
+          userId: user?.id 
+        }
       });
 
       if (error) {
@@ -28,17 +43,10 @@ const Index = () => {
       }
 
       setSearchResults(data);
-      toast({
-        title: "Search completed!",
-        description: `Found content about "${searchQuery}"`,
-      });
+      showSuccess(`Found educational content about "${searchQuery}"`);
     } catch (error) {
       console.error('Search error:', error);
-      toast({
-        title: "Search failed",
-        description: "Please try again later",
-        variant: "destructive",
-      });
+      showError("Search failed. Please try again later.");
     } finally {
       setIsSearching(false);
     }
@@ -50,7 +58,18 @@ const Index = () => {
     }
   };
 
-  const handleOpenContent = (url: string) => {
+  const handleOpenContent = (url: string, item: any) => {
+    if (item.content_type === 'video' && url.includes('youtube.com/watch?v=')) {
+      const videoId = item.metadata?.videoId || url.split('v=')[1]?.split('&')[0];
+      if (videoId) {
+        setYoutubeModal({
+          isOpen: true,
+          videoId,
+          title: item.title
+        });
+        return;
+      }
+    }
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
@@ -86,12 +105,28 @@ const Index = () => {
           <CardTitle className="text-lg leading-tight line-clamp-2">
             {item.title}
           </CardTitle>
+          {item.relevanceScore && (
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
+                {item.relevanceScore}% match
+              </Badge>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           <CardDescription className="text-sm mb-4 line-clamp-3">
             {item.summary}
           </CardDescription>
-          <div className="flex items-center justify-between text-xs text-gray-500">
+          {item.learningTopics && item.learningTopics.length > 0 && (
+            <div className="flex flex-wrap gap-1 mb-3">
+              {item.learningTopics.slice(0, 3).map((topic: string, index: number) => (
+                <Badge key={index} variant="outline" className="text-xs">
+                  {topic}
+                </Badge>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-between text-xs text-gray-500 mb-4">
             <div className="flex items-center gap-2">
               <User className="h-3 w-3" />
               <span>{item.author}</span>
@@ -110,10 +145,10 @@ const Index = () => {
             )}
           </div>
           <Button 
-            className="w-full mt-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
-            onClick={() => handleOpenContent(item.url)}
+            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+            onClick={() => handleOpenContent(item.url, item)}
           >
-            Open
+            {type === 'video' ? 'Watch' : 'Open'}
           </Button>
         </CardContent>
       </Card>
@@ -134,6 +169,14 @@ const Index = () => {
     </div>
   );
 
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       {/* Header */}
@@ -148,6 +191,31 @@ const Index = () => {
                 Shiksha
               </h1>
             </div>
+            
+            <div className="flex items-center gap-4">
+              {user ? (
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-gray-600">
+                    Welcome, {user.user_metadata?.full_name || user.email}
+                  </span>
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => signOut()}
+                  >
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Sign Out
+                  </Button>
+                </div>
+              ) : (
+                <Button 
+                  onClick={() => setShowAuthModal(true)}
+                  className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+                >
+                  Sign In
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -159,7 +227,7 @@ const Index = () => {
             Learn Anything from the Internet
           </h2>
           <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Discover curated educational content from across the web, complete with AI-powered summaries
+            Discover curated educational content from across the web, complete with AI-powered summaries and intelligent filtering
           </p>
           
           <div className="flex gap-4 max-w-2xl mx-auto">
@@ -240,29 +308,45 @@ const Index = () => {
                   <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Play className="h-8 w-8 text-red-600" />
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">Video Content</h3>
-                  <p className="text-gray-600">Curated educational videos from YouTube and other platforms</p>
+                  <h3 className="text-xl font-semibold mb-2">AI-Filtered Videos</h3>
+                  <p className="text-gray-600">Curated educational videos with AI-powered relevance scoring</p>
                 </div>
                 <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
                   <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <FileText className="h-8 w-8 text-blue-600" />
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">Blog Articles</h3>
-                  <p className="text-gray-600">In-depth articles and tutorials from educational blogs</p>
+                  <h3 className="text-xl font-semibold mb-2">Quality Articles</h3>
+                  <p className="text-gray-600">In-depth articles from trusted educational sources</p>
                 </div>
                 <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
                   <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Globe className="h-8 w-8 text-green-600" />
                   </div>
-                  <h3 className="text-xl font-semibold mb-2">Web Resources</h3>
-                  <p className="text-gray-600">Interactive courses and educational websites</p>
+                  <h3 className="text-xl font-semibold mb-2">Learning Platforms</h3>
+                  <p className="text-gray-600">Interactive courses from leading educational platforms</p>
                 </div>
               </div>
             </div>
           </div>
         )}
       </div>
+
+      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      <YoutubeModal 
+        isOpen={youtubeModal.isOpen}
+        onClose={() => setYoutubeModal({isOpen: false, videoId: '', title: ''})}
+        videoId={youtubeModal.videoId}
+        title={youtubeModal.title}
+      />
     </div>
+  );
+};
+
+const Index = () => {
+  return (
+    <AuthProvider>
+      <IndexContent />
+    </AuthProvider>
   );
 };
 

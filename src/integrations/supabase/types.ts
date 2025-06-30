@@ -54,6 +54,39 @@ export type Database = {
         }
         Relationships: []
       }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          email: string | null
+          full_name: string | null
+          id: string
+          phone_number: string | null
+          provider: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id: string
+          phone_number?: string | null
+          provider?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          email?: string | null
+          full_name?: string | null
+          id?: string
+          phone_number?: string | null
+          provider?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       search_cache: {
         Row: {
           content_type: string
@@ -78,6 +111,36 @@ export type Database = {
           id?: string
           query?: string
           results?: Json
+        }
+        Relationships: []
+      }
+      user_preferences: {
+        Row: {
+          created_at: string
+          difficulty_level: string | null
+          id: string
+          learning_topics: string[] | null
+          preferred_content_types: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          difficulty_level?: string | null
+          id?: string
+          learning_topics?: string[] | null
+          preferred_content_types?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          difficulty_level?: string | null
+          id?: string
+          learning_topics?: string[] | null
+          preferred_content_types?: string[] | null
+          updated_at?: string
+          user_id?: string
         }
         Relationships: []
       }
