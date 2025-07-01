@@ -35,6 +35,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setSession(session);
         setUser(session?.user ?? null);
         setLoading(false);
+        
+        // Log security events
+        if (event === 'SIGNED_IN') {
+          console.log('User signed in:', session?.user?.id);
+        } else if (event === 'SIGNED_OUT') {
+          console.log('User signed out');
+        }
       }
     );
 
@@ -48,24 +55,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => subscription.unsubscribe();
   }, []);
 
+  const validateEmail = (email: string): boolean => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return emailRegex.test(email) && email.length <= 320;
+  };
+
+  const validatePassword = (password: string): boolean => {
+    return password.length >= 6 && password.length <= 128;
+  };
+
   const signIn = async (email: string, password: string) => {
+    if (!validateEmail(email)) {
+      return { error: { message: 'Please enter a valid email address' } };
+    }
+    
+    if (!validatePassword(password)) {
+      return { error: { message: 'Password must be between 6 and 128 characters' } };
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.toLowerCase().trim(),
       password
     });
     return { error };
   };
 
   const signUp = async (email: string, password: string, fullName: string) => {
+    if (!validateEmail(email)) {
+      return { error: { message: 'Please enter a valid email address' } };
+    }
+    
+    if (!validatePassword(password)) {
+      return { error: { message: 'Password must be between 6 and 128 characters' } };
+    }
+
+    if (!fullName || fullName.trim().length < 2) {
+      return { error: { message: 'Please enter a valid full name' } };
+    }
+
     const redirectUrl = `${window.location.origin}/`;
     
     const { error } = await supabase.auth.signUp({
-      email,
+      email: email.toLowerCase().trim(),
       password,
       options: {
         emailRedirectTo: redirectUrl,
         data: {
-          full_name: fullName
+          full_name: fullName.trim()
         }
       }
     });
@@ -87,7 +123,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const signOut = async () => {
+    // Invalidate session on sign out
     await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
   };
 
   const value = {

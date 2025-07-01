@@ -2,10 +2,10 @@
 project_id = "whvdvuzkzcdtsdtfzdag"
 
 [functions.search-content]
-verify_jwt = false
+verify_jwt = true
 
 [functions.generate-summary]
-verify_jwt = false
+verify_jwt = true
 
 [functions.ai-chat]
-verify_jwt = false
+verify_jwt = true

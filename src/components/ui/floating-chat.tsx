@@ -7,6 +7,7 @@ import { MessageCircle, X, Send, User, Bot } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useCustomToast } from '@/hooks/use-toast-custom';
 import { useAuth } from '@/components/auth/AuthContext';
+import DOMPurify from 'dompurify';
 
 interface Message {
   id: string;
@@ -28,9 +29,15 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({ searchContext, onAut
   const { showError } = useCustomToast();
   const { user } = useAuth();
 
-  const formatAIResponse = (text: string) => {
-    // Clean up response and format it properly
-    return text
+  const sanitizeAndFormatText = (text: string) => {
+    // First sanitize to prevent XSS
+    const sanitized = DOMPurify.sanitize(text, { 
+      ALLOWED_TAGS: ['strong', 'em', 'br', 'p'],
+      ALLOWED_ATTR: []
+    });
+    
+    // Then apply safe formatting
+    return sanitized
       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.*?)\*/g, '<em>$1</em>')
       .replace(/\n\n/g, '<br><br>')
@@ -39,17 +46,38 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({ searchContext, onAut
       .replace(/^\d+\.\s+/gm, '• ');
   };
 
+  const validateInput = (input: string): boolean => {
+    if (!input || typeof input !== 'string') return false;
+    if (input.length > 1000) return false; // Limit message length
+    if (input.trim().length === 0) return false;
+    
+    // Check for potentially malicious patterns
+    const suspiciousPatterns = [
+      /<script/i,
+      /javascript:/i,
+      /on\w+\s*=/i,
+      /data:text\/html/i
+    ];
+    
+    return !suspiciousPatterns.some(pattern => pattern.test(input));
+  };
+
   const sendMessage = async () => {
     if (!user) {
       onAuthRequired();
       return;
     }
 
-    if (!currentMessage.trim()) return;
+    const trimmedMessage = currentMessage.trim();
+    
+    if (!validateInput(trimmedMessage)) {
+      showError('Invalid message content. Please try again.');
+      return;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: currentMessage,
+      text: trimmedMessage,
       isUser: true,
       timestamp: new Date()
     };
@@ -61,12 +89,16 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({ searchContext, onAut
     try {
       const { data, error } = await supabase.functions.invoke('ai-chat', {
         body: {
-          message: currentMessage,
-          context: searchContext
+          message: trimmedMessage,
+          context: searchContext || ''
         }
       });
 
       if (error) throw error;
+
+      if (!data?.response || typeof data.response !== 'string') {
+        throw new Error('Invalid response format');
+      }
 
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -88,6 +120,13 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({ searchContext, onAut
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    if (value.length <= 1000) { // Limit input length
+      setCurrentMessage(value);
     }
   };
 
@@ -151,7 +190,7 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({ searchContext, onAut
                     ) : (
                       <div 
                         dangerouslySetInnerHTML={{ 
-                          __html: formatAIResponse(message.text) 
+                          __html: sanitizeAndFormatText(message.text) 
                         }} 
                       />
                     )}
@@ -177,11 +216,12 @@ export const FloatingChat: React.FC<FloatingChatProps> = ({ searchContext, onAut
               <Input
                 placeholder="Ask me anything..."
                 value={currentMessage}
-                onChange={(e) => setCurrentMessage(e.target.value)}
+                onChange={handleInputChange}
                 onKeyPress={handleKeyPress}
                 onFocus={handleInputFocus}
                 disabled={isLoading}
                 className="flex-1 text-xs h-8"
+                maxLength={1000}
               />
               <Button
                 onClick={sendMessage}
