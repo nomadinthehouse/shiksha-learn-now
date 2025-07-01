@@ -11,6 +11,7 @@ import { AuthModal } from "@/components/auth/AuthModal";
 import { YoutubeModal } from "@/components/ui/youtube-modal";
 import { FloatingChat } from "@/components/ui/floating-chat";
 import { LearningLevelModal } from "@/components/ui/learning-level-modal";
+import { DashboardSidebar } from "@/components/ui/dashboard-sidebar";
 
 const IndexContent = () => {
   const [searchQuery, setSearchQuery] = useState("");
@@ -25,6 +26,7 @@ const IndexContent = () => {
     videoId: '',
     title: ''
   });
+  const [showSidebar, setShowSidebar] = useState(false);
   
   const { showSuccess, showError } = useCustomToast();
   const { user, loading, signOut } = useAuth();
@@ -79,11 +81,42 @@ const IndexContent = () => {
     }
   };
 
-  const handleOpenContent = (url: string, item: any) => {
+  const handleOpenContent = async (url: string, item: any) => {
     if (!user) {
       setAuthMessage("Please sign in to access educational content and track your learning progress.");
       setShowAuthModal(true);
       return;
+    }
+
+    // Track user progress
+    try {
+      await supabase
+        .from('user_progress')
+        .upsert({
+          user_id: user.id,
+          topic: searchQuery.toLowerCase(),
+          content_url: url,
+          content_type: item.content_type || 'website',
+          status: 'in_progress',
+          completion_percentage: 0,
+          time_spent: 0
+        }, {
+          onConflict: 'user_id,content_url'
+        });
+
+      // Track search history
+      await supabase
+        .from('search_history')
+        .insert({
+          user_id: user.id,
+          query: searchQuery,
+          learning_level: learningLevel,
+          results_count: (searchResults?.videos?.length || 0) + 
+                        (searchResults?.websites?.length || 0) + 
+                        (searchResults?.blogs?.length || 0)
+        });
+    } catch (error) {
+      console.error('Error tracking progress:', error);
     }
 
     if (item.content_type === 'video' && url.includes('youtube.com/watch?v=')) {
@@ -98,6 +131,11 @@ const IndexContent = () => {
       }
     }
     window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleTopicSelect = (topic: string) => {
+    setSearchQuery(topic);
+    setShowLearningLevelModal(true);
   };
 
   const handleAuthRequired = () => {
@@ -255,114 +293,129 @@ const IndexContent = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 py-8">
-        {/* Search Section */}
-        <div className="text-center mb-12">
-          <h2 className="text-4xl font-bold text-gray-900 mb-4">
-            Learn Anything from the Internet
-          </h2>
-          <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Discover curated educational content tailored to your learning level, complete with AI-powered summaries and intelligent filtering
-          </p>
-          
-          <div className="flex gap-4 max-w-2xl mx-auto">
-            <Input
-              placeholder="What do you want to learn today?"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              onKeyPress={handleKeyPress}
-              className="text-lg py-6 border-2 border-gray-200 focus:border-blue-500 rounded-xl"
-            />
-            <Button
-              onClick={handleSearchClick}
-              disabled={isSearching}
-              className="px-8 py-6 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl"
-            >
-              {isSearching ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                  Searching...
-                </div>
-              ) : (
-                <div className="flex items-center gap-2">
-                  <Search className="h-5 w-5" />
-                  Search
-                </div>
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {/* Search Results */}
-        {searchResults && (
-          <div className="space-y-12">
-            {/* Videos Section */}
-            {searchResults.videos && searchResults.videos.length > 0 && (
-              <section>
-                <SectionHeader title="Videos" count={searchResults.videos.length} />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.videos.map((video: any, index: number) => (
-                    <ContentCard key={`video-${index}`} item={video} type="video" />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Websites Section */}
-            {searchResults.websites && searchResults.websites.length > 0 && (
-              <section>
-                <SectionHeader title="Websites" count={searchResults.websites.length} />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.websites.map((website: any, index: number) => (
-                    <ContentCard key={`website-${index}`} item={website} type="website" />
-                  ))}
-                </div>
-              </section>
-            )}
-
-            {/* Blogs Section */}
-            {searchResults.blogs && searchResults.blogs.length > 0 && (
-              <section>
-                <SectionHeader title="Blogs" count={searchResults.blogs.length} />
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {searchResults.blogs.map((blog: any, index: number) => (
-                    <ContentCard key={`blog-${index}`} item={blog} type="blog" />
-                  ))}
-                </div>
-              </section>
-            )}
-          </div>
-        )}
-
-        {/* Welcome State */}
-        {!searchResults && !isSearching && (
-          <div className="text-center py-20">
-            <div className="max-w-4xl mx-auto">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
-                <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Play className="h-8 w-8 text-red-600" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">AI-Filtered Videos</h3>
-                  <p className="text-gray-600">Curated educational videos with AI-powered relevance scoring</p>
-                </div>
-                <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <Globe className="h-8 w-8 text-green-600" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Learning Platforms</h3>
-                  <p className="text-gray-600">Interactive courses from leading educational platforms</p>
-                </div>
-                <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <FileText className="h-8 w-8 text-blue-600" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Quality Articles</h3>
-                  <p className="text-gray-600">In-depth articles from trusted educational sources</p>
-                </div>
+        <div className="flex gap-8">
+          {/* Main Content */}
+          <div className="flex-1">
+            {/* Search Section */}
+            <div className="text-center mb-12">
+              <h2 className="text-4xl font-bold text-gray-900 mb-4">
+                Learn Anything from the Internet
+              </h2>
+              <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
+                Discover curated educational content tailored to your learning level, complete with AI-powered summaries and intelligent filtering
+              </p>
+              
+              <div className="flex gap-4 max-w-2xl mx-auto">
+                <Input
+                  placeholder="What do you want to learn today?"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  className="text-lg py-6 border-2 border-gray-200 focus:border-blue-500 rounded-xl"
+                />
+                <Button
+                  onClick={handleSearchClick}
+                  disabled={isSearching}
+                  className="px-8 py-6 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl"
+                >
+                  {isSearching ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Searching...
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Search className="h-5 w-5" />
+                      Search
+                    </div>
+                  )}
+                </Button>
               </div>
             </div>
+
+            {/* Search Results */}
+            {searchResults && (
+              <div className="space-y-12">
+                {/* Videos Section */}
+                {searchResults.videos && searchResults.videos.length > 0 && (
+                  <section>
+                    <SectionHeader title="Videos" count={searchResults.videos.length} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {searchResults.videos.map((video: any, index: number) => (
+                        <ContentCard key={`video-${index}`} item={video} type="video" />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* Websites Section */}
+                {searchResults.websites && searchResults.websites.length > 0 && (
+                  <section>
+                    <SectionHeader title="Websites" count={searchResults.websites.length} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {searchResults.websites.map((website: any, index: number) => (
+                        <ContentCard key={`website-${index}`} item={website} type="website" />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* Blogs Section */}
+                {searchResults.blogs && searchResults.blogs.length > 0 && (
+                  <section>
+                    <SectionHeader title="Blogs" count={searchResults.blogs.length} />
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      {searchResults.blogs.map((blog: any, index: number) => (
+                        <ContentCard key={`blog-${index}`} item={blog} type="blog" />
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+
+            {/* Welcome State */}
+            {!searchResults && !isSearching && (
+              <div className="text-center py-20">
+                <div className="max-w-4xl mx-auto">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+                    <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+                      <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Play className="h-8 w-8 text-red-600" />
+                      </div>
+                      <h3 className="text-xl font-semibold mb-2">AI-Filtered Videos</h3>
+                      <p className="text-gray-600">Curated educational videos with AI-powered relevance scoring</p>
+                    </div>
+                    <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+                      <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <Globe className="h-8 w-8 text-green-600" />
+                      </div>
+                      <h3 className="text-xl font-semibold mb-2">Learning Platforms</h3>
+                      <p className="text-gray-600">Interactive courses from leading educational platforms</p>
+                    </div>
+                    <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+                      <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <FileText className="h-8 w-8 text-blue-600" />
+                      </div>
+                      <h3 className="text-xl font-semibold mb-2">Quality Articles</h3>
+                      <p className="text-gray-600">In-depth articles from trusted educational sources</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
-        )}
+
+          {/* Sidebar - only show when user is logged in and has searched */}
+          {user && searchResults && (
+            <div className="w-80 flex-shrink-0">
+              <DashboardSidebar 
+                currentTopic={searchQuery}
+                onTopicSelect={handleTopicSelect}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {searchResults && <FloatingChat searchContext={searchQuery} onAuthRequired={handleAuthRequired} />}

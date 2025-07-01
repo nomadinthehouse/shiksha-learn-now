@@ -54,6 +54,36 @@ export type Database = {
         }
         Relationships: []
       }
+      learning_paths: {
+        Row: {
+          created_at: string
+          current_topic: string
+          difficulty_level: string | null
+          id: string
+          recommended_topics: string[] | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          current_topic: string
+          difficulty_level?: string | null
+          id?: string
+          recommended_topics?: string[] | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          current_topic?: string
+          difficulty_level?: string | null
+          id?: string
+          recommended_topics?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -114,6 +144,69 @@ export type Database = {
         }
         Relationships: []
       }
+      search_history: {
+        Row: {
+          created_at: string
+          id: string
+          learning_level: string
+          query: string
+          results_count: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          learning_level: string
+          query: string
+          results_count?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          learning_level?: string
+          query?: string
+          results_count?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_notes: {
+        Row: {
+          content: string
+          content_url: string | null
+          created_at: string
+          id: string
+          tags: string[] | null
+          title: string
+          topic: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          content: string
+          content_url?: string | null
+          created_at?: string
+          id?: string
+          tags?: string[] | null
+          title: string
+          topic: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          content?: string
+          content_url?: string | null
+          created_at?: string
+          id?: string
+          tags?: string[] | null
+          title?: string
+          topic?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_preferences: {
         Row: {
           created_at: string
@@ -139,6 +232,48 @@ export type Database = {
           id?: string
           learning_topics?: string[] | null
           preferred_content_types?: string[] | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_progress: {
+        Row: {
+          completion_percentage: number | null
+          content_type: string
+          content_url: string
+          created_at: string
+          id: string
+          notes: string | null
+          status: string | null
+          time_spent: number | null
+          topic: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completion_percentage?: number | null
+          content_type: string
+          content_url: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          status?: string | null
+          time_spent?: number | null
+          topic: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completion_percentage?: number | null
+          content_type?: string
+          content_url?: string
+          created_at?: string
+          id?: string
+          notes?: string | null
+          status?: string | null
+          time_spent?: number | null
+          topic?: string
           updated_at?: string
           user_id?: string
         }
