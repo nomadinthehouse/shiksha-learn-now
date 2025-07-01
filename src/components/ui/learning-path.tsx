@@ -51,6 +51,7 @@ export const LearningPath: React.FC<LearningPathProps> = ({ currentTopic, onTopi
         const { data: newPath, error } = await supabase
           .from('learning_paths')
           .insert({
+            user_id: user!.id,
             current_topic: topic.toLowerCase(),
             recommended_topics: recommendations,
             difficulty_level: 'beginner'

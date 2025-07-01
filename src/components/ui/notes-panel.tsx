@@ -81,6 +81,7 @@ export const NotesPanel: React.FC<NotesPanelProps> = ({ currentTopic, contentUrl
       const { error } = await supabase
         .from('user_notes')
         .insert({
+          user_id: user!.id,
           topic: currentTopic?.toLowerCase() || 'general',
           title: newNote.title,
           content: newNote.content,
