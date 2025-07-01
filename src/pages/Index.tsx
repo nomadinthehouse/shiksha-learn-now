@@ -1,4 +1,3 @@
-
 import { Search, Play, FileText, Globe, Clock, User, Star, LogOut } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -11,12 +10,16 @@ import { AuthProvider, useAuth } from "@/components/auth/AuthContext";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { YoutubeModal } from "@/components/ui/youtube-modal";
 import { FloatingChat } from "@/components/ui/floating-chat";
+import { LearningLevelModal } from "@/components/ui/learning-level-modal";
 
 const IndexContent = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<any>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
+  const [showLearningLevelModal, setShowLearningLevelModal] = useState(false);
+  const [learningLevel, setLearningLevel] = useState<'beginner' | 'intermediate' | 'advanced'>('beginner');
   const [youtubeModal, setYoutubeModal] = useState<{isOpen: boolean, videoId: string, title: string}>({
     isOpen: false,
     videoId: '',
@@ -26,7 +29,7 @@ const IndexContent = () => {
   const { showSuccess, showError } = useCustomToast();
   const { user, loading, signOut } = useAuth();
 
-  const handleSearch = async () => {
+  const handleSearch = async (level?: 'beginner' | 'intermediate' | 'advanced') => {
     if (!searchQuery.trim()) {
       showError("Please enter a search query to find educational content.");
       return;
@@ -38,7 +41,8 @@ const IndexContent = () => {
       const { data, error } = await supabase.functions.invoke('search-content', {
         body: { 
           query: searchQuery,
-          userId: user?.id 
+          userId: user?.id,
+          learningLevel: level || learningLevel
         }
       });
 
@@ -47,7 +51,7 @@ const IndexContent = () => {
       }
 
       setSearchResults(data);
-      showSuccess(`Found educational content about "${searchQuery}"`);
+      showSuccess(`Found educational content about "${searchQuery}" for ${level || learningLevel} level`);
     } catch (error) {
       console.error('Search error:', error);
       showError("Search failed. Please try again later.");
@@ -56,13 +60,32 @@ const IndexContent = () => {
     }
   };
 
+  const handleSearchClick = () => {
+    if (!searchQuery.trim()) {
+      showError("Please enter a search query to find educational content.");
+      return;
+    }
+    setShowLearningLevelModal(true);
+  };
+
+  const handleLearningLevelSelect = (level: 'beginner' | 'intermediate' | 'advanced') => {
+    setLearningLevel(level);
+    handleSearch(level);
+  };
+
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      handleSearch();
+      handleSearchClick();
     }
   };
 
   const handleOpenContent = (url: string, item: any) => {
+    if (!user) {
+      setAuthMessage("Please sign in to access educational content and track your learning progress.");
+      setShowAuthModal(true);
+      return;
+    }
+
     if (item.content_type === 'video' && url.includes('youtube.com/watch?v=')) {
       const videoId = item.metadata?.videoId || url.split('v=')[1]?.split('&')[0];
       if (videoId) {
@@ -75,6 +98,11 @@ const IndexContent = () => {
       }
     }
     window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleAuthRequired = () => {
+    setAuthMessage("Please sign in to use the learning assistant and get personalized help.");
+    setShowAuthModal(true);
   };
 
   const ContentCard = ({ item, type }: { item: any; type: 'video' | 'blog' | 'website' }) => {
@@ -148,12 +176,14 @@ const IndexContent = () => {
               </div>
             )}
           </div>
-          <Button 
-            className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 mt-auto"
-            onClick={() => handleOpenContent(item.url, item)}
-          >
-            {type === 'video' ? 'Watch' : 'Open'}
-          </Button>
+          <div className="mt-auto">
+            <Button 
+              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700"
+              onClick={() => handleOpenContent(item.url, item)}
+            >
+              {type === 'video' ? 'Watch' : 'Open'}
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
@@ -231,7 +261,7 @@ const IndexContent = () => {
             Learn Anything from the Internet
           </h2>
           <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto">
-            Discover curated educational content from across the web, complete with AI-powered summaries and intelligent filtering
+            Discover curated educational content tailored to your learning level, complete with AI-powered summaries and intelligent filtering
           </p>
           
           <div className="flex gap-4 max-w-2xl mx-auto">
@@ -243,7 +273,7 @@ const IndexContent = () => {
               className="text-lg py-6 border-2 border-gray-200 focus:border-blue-500 rounded-xl"
             />
             <Button
-              onClick={handleSearch}
+              onClick={handleSearchClick}
               disabled={isSearching}
               className="px-8 py-6 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl"
             >
@@ -316,18 +346,18 @@ const IndexContent = () => {
                   <p className="text-gray-600">Curated educational videos with AI-powered relevance scoring</p>
                 </div>
                 <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
-                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <FileText className="h-8 w-8 text-blue-600" />
-                  </div>
-                  <h3 className="text-xl font-semibold mb-2">Quality Articles</h3>
-                  <p className="text-gray-600">In-depth articles from trusted educational sources</p>
-                </div>
-                <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
                   <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Globe className="h-8 w-8 text-green-600" />
                   </div>
                   <h3 className="text-xl font-semibold mb-2">Learning Platforms</h3>
                   <p className="text-gray-600">Interactive courses from leading educational platforms</p>
+                </div>
+                <div className="bg-white rounded-2xl p-8 shadow-lg hover:shadow-xl transition-shadow">
+                  <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <FileText className="h-8 w-8 text-blue-600" />
+                  </div>
+                  <h3 className="text-xl font-semibold mb-2">Quality Articles</h3>
+                  <p className="text-gray-600">In-depth articles from trusted educational sources</p>
                 </div>
               </div>
             </div>
@@ -335,10 +365,19 @@ const IndexContent = () => {
         )}
       </div>
 
-      {/* Floating Chat - only show on search results page */}
-      {searchResults && <FloatingChat searchContext={searchQuery} />}
+      {searchResults && <FloatingChat searchContext={searchQuery} onAuthRequired={handleAuthRequired} />}
 
-      <AuthModal isOpen={showAuthModal} onClose={() => setShowAuthModal(false)} />
+      <AuthModal 
+        isOpen={showAuthModal} 
+        onClose={() => setShowAuthModal(false)}
+        message={authMessage}
+      />
+      <LearningLevelModal
+        isOpen={showLearningLevelModal}
+        onClose={() => setShowLearningLevelModal(false)}
+        onLevelSelect={handleLearningLevelSelect}
+        topic={searchQuery}
+      />
       <YoutubeModal 
         isOpen={youtubeModal.isOpen}
         onClose={() => setYoutubeModal({isOpen: false, videoId: '', title: ''})}

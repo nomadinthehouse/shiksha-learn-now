@@ -1,30 +1,13 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.50.2'
+
 import { corsHeaders } from '../_shared/cors.ts'
 
-const supabase = createClient(
-  Deno.env.get('SUPABASE_URL') ?? '',
-  Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
-)
+const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
 
 interface SearchRequest {
   query: string;
   userId?: string;
-}
-
-interface ContentItem {
-  title: string;
-  url: string;
-  content_type: 'video' | 'blog' | 'website';
-  summary?: string;
-  thumbnail_url?: string;
-  author?: string;
-  duration?: string;
-  publish_date?: string;
-  source: string;
-  metadata?: any;
-  isEducational?: boolean;
-  relevanceScore?: number;
-  learningTopics?: string[];
+  learningLevel?: 'beginner' | 'intermediate' | 'advanced';
 }
 
 Deno.serve(async (req) => {
@@ -35,12 +18,11 @@ Deno.serve(async (req) => {
   console.log('Search content function called');
 
   try {
-    const { query, userId }: SearchRequest = await req.json();
-    
-    if (!query || query.trim().length === 0) {
-      console.error('Empty query received');
+    const { query, userId, learningLevel = 'beginner' }: SearchRequest = await req.json();
+
+    if (!query) {
       return new Response(
-        JSON.stringify({ error: 'Query parameter is required' }),
+        JSON.stringify({ error: 'Query is required' }),
         { 
           status: 400, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -48,46 +30,166 @@ Deno.serve(async (req) => {
       );
     }
 
-    console.log(`Searching for: ${query}`);
+    console.log(`Searching for: "${query}" at ${learningLevel} level`);
 
-    // Check cache first
-    const cachedResults = await checkCache(query);
-    if (cachedResults) {
-      console.log('Returning cached results');
-      return new Response(
-        JSON.stringify(cachedResults),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        }
-      );
-    }
-
-    // Fetch content from multiple sources concurrently
-    console.log('Fetching content from multiple sources');
-    const [videos, blogs, websites] = await Promise.allSettled([
-      fetchYouTubeVideos(query),
-      fetchBlogArticles(query),
-      fetchWebsiteContent(query)
-    ]);
-
-    let results = {
-      videos: videos.status === 'fulfilled' ? videos.value : [],
-      blogs: blogs.status === 'fulfilled' ? blogs.value : [],
-      websites: websites.status === 'fulfilled' ? websites.value : []
+    // Enhanced search query based on learning level
+    const levelKeywords = {
+      beginner: 'basics fundamentals introduction tutorial getting started',
+      intermediate: 'practical examples implementation hands-on intermediate',
+      advanced: 'advanced expert professional in-depth comprehensive'
     };
 
-    console.log(`Raw results: ${results.videos.length} videos, ${results.blogs.length} blogs, ${results.websites.length} websites`);
+    const enhancedQuery = `${query} ${levelKeywords[learningLevel]}`;
 
-    // Apply AI filtering and enhancement
-    results = await enhanceWithAI(results, query);
+    // Search YouTube videos
+    let videos = [];
+    if (YOUTUBE_API_KEY) {
+      try {
+        console.log('Searching YouTube videos...');
+        const youtubeResponse = await fetch(
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(enhancedQuery)}&type=video&maxResults=15&order=relevance&videoDuration=medium&key=${YOUTUBE_API_KEY}`
+        );
+        
+        if (youtubeResponse.ok) {
+          const youtubeData = await youtubeResponse.json();
+          console.log(`Found ${youtubeData.items?.length || 0} YouTube videos`);
 
-    // Cache the results
-    await storeResultsInCache(query, results);
+          // Get video details for duration filtering
+          const videoIds = youtubeData.items?.map((item: any) => item.id.videoId).join(',');
+          if (videoIds) {
+            const detailsResponse = await fetch(
+              `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics&id=${videoIds}&key=${YOUTUBE_API_KEY}`
+            );
+            
+            const detailsData = await detailsResponse.json();
+            const videoDetails = new Map();
+            detailsData.items?.forEach((item: any) => {
+              videoDetails.set(item.id, {
+                duration: item.contentDetails.duration,
+                viewCount: parseInt(item.statistics.viewCount || '0')
+              });
+            });
 
-    console.log(`Final results: ${results.videos.length} videos, ${results.blogs.length} blogs, ${results.websites.length} websites`);
+            for (const item of youtubeData.items || []) {
+              const details = videoDetails.get(item.id.videoId);
+              const duration = parseDuration(details?.duration || 'PT0S');
+              
+              // Filter based on learning level and duration
+              const minDuration = learningLevel === 'beginner' ? 300 : learningLevel === 'intermediate' ? 600 : 900; // 5, 10, 15 minutes
+              
+              if (duration >= minDuration && duration <= 3600) { // Max 1 hour
+                try {
+                  console.log(`Processing video: ${item.snippet.title}`);
+                  const summaryResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-summary`, {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`
+                    },
+                    body: JSON.stringify({
+                      title: item.snippet.title,
+                      description: item.snippet.description,
+                      query: enhancedQuery,
+                      contentType: 'video',
+                      duration: formatDuration(duration),
+                      learningLevel
+                    })
+                  });
+
+                  if (summaryResponse.ok) {
+                    const summary = await summaryResponse.json();
+                    
+                    // Apply stricter filtering based on learning level
+                    const minScore = learningLevel === 'beginner' ? 60 : learningLevel === 'intermediate' ? 65 : 70;
+                    
+                    if (summary.isEducational && summary.relevanceScore >= minScore) {
+                      videos.push({
+                        title: item.snippet.title,
+                        url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
+                        author: item.snippet.channelTitle,
+                        duration: formatDuration(duration),
+                        summary: summary.summary,
+                        relevanceScore: summary.relevanceScore,
+                        learningTopics: summary.learningTopics,
+                        source: 'YouTube',
+                        content_type: 'video',
+                        metadata: {
+                          videoId: item.id.videoId,
+                          viewCount: details?.viewCount || 0,
+                          learningLevel
+                        }
+                      });
+                    }
+                  }
+                } catch (error) {
+                  console.error('Error processing video:', error);
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('YouTube API error:', error);
+      }
+    }
+
+    // Mock websites data with level-appropriate content
+    const websites = [
+      {
+        title: learningLevel === 'beginner' ? `${query} - Complete Beginner's Guide` : 
+               learningLevel === 'intermediate' ? `${query} - Practical Implementation Guide` :
+               `${query} - Advanced Concepts and Best Practices`,
+        url: `https://example.com/${query.toLowerCase().replace(/\s+/g, '-')}-${learningLevel}`,
+        author: 'Educational Platform',
+        summary: learningLevel === 'beginner' ? 
+                `Start your ${query} journey with this comprehensive beginner's guide covering all the fundamentals you need to know.` :
+                learningLevel === 'intermediate' ?
+                `Build upon your ${query} knowledge with practical examples and real-world implementations.` :
+                `Master advanced ${query} concepts with in-depth analysis and professional techniques.`,
+        relevanceScore: learningLevel === 'beginner' ? 85 : learningLevel === 'intermediate' ? 88 : 92,
+        learningTopics: learningLevel === 'beginner' ? 
+                       [`${query} basics`, 'fundamentals', 'getting started'] :
+                       learningLevel === 'intermediate' ?
+                       [`${query} implementation`, 'practical examples', 'hands-on'] :
+                       [`advanced ${query}`, 'expert techniques', 'best practices'],
+        source: 'Educational Site',
+        content_type: 'website',
+        metadata: { 
+          readTime: learningLevel === 'beginner' ? '15 min read' : 
+                   learningLevel === 'intermediate' ? '25 min read' : '35 min read',
+          learningLevel 
+        }
+      }
+    ];
+
+    // Mock blogs data
+    const blogs = [
+      {
+        title: `Understanding ${query}: A ${learningLevel.charAt(0).toUpperCase() + learningLevel.slice(1)}'s Perspective`,
+        url: `https://blog.example.com/${query.toLowerCase().replace(/\s+/g, '-')}-${learningLevel}`,
+        author: 'Tech Writer',
+        summary: `Dive deep into ${query} with this detailed ${learningLevel}-level analysis covering key concepts and practical applications.`,
+        relevanceScore: learningLevel === 'beginner' ? 80 : learningLevel === 'intermediate' ? 85 : 90,
+        learningTopics: [`${query}`, `${learningLevel} level`, 'tutorial'],
+        source: 'Tech Blog',
+        content_type: 'blog',
+        metadata: { 
+          readTime: '20 min read',
+          learningLevel 
+        }
+      }
+    ];
+
+    console.log(`Returning ${videos.length} videos, ${websites.length} websites, ${blogs.length} blogs`);
 
     return new Response(
-      JSON.stringify(results),
+      JSON.stringify({
+        videos: videos.sort((a, b) => b.relevanceScore - a.relevanceScore),
+        websites,
+        blogs,
+        totalResults: videos.length + websites.length + blogs.length,
+        learningLevel
+      }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
@@ -96,7 +198,7 @@ Deno.serve(async (req) => {
   } catch (error) {
     console.error('Search error:', error);
     return new Response(
-      JSON.stringify({ error: 'Internal server error' }),
+      JSON.stringify({ error: 'Search failed', details: error.message }),
       { 
         status: 500, 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -105,361 +207,25 @@ Deno.serve(async (req) => {
   }
 });
 
-async function enhanceWithAI(results: any, query: string) {
-  console.log('Starting AI enhancement of content');
+function parseDuration(duration: string): number {
+  const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+  if (!match) return 0;
   
-  const allContent = [
-    ...results.videos.map((item: any) => ({ ...item, contentType: 'video' })),
-    ...results.blogs.map((item: any) => ({ ...item, contentType: 'blog' })),
-    ...results.websites.map((item: any) => ({ ...item, contentType: 'website' }))
-  ];
-
-  console.log(`Processing ${allContent.length} items for AI enhancement`);
-
-  const enhancedContent = await Promise.all(
-    allContent.map(async (item) => {
-      try {
-        console.log(`Enhancing item: ${item.title}`);
-        const response = await supabase.functions.invoke('generate-summary', {
-          body: {
-            title: item.title,
-            description: item.summary || '',
-            query: query,
-            contentType: item.contentType,
-            duration: item.duration
-          }
-        });
-
-        if (response.data && !response.error) {
-          console.log(`Enhanced item successfully: ${item.title}`);
-          return {
-            ...item,
-            summary: response.data.summary,
-            isEducational: response.data.isEducational,
-            relevanceScore: response.data.relevanceScore,
-            learningTopics: response.data.learningTopics
-          };
-        } else {
-          console.error(`Enhancement failed for ${item.title}:`, response.error);
-        }
-      } catch (error) {
-        console.error('AI enhancement error for item:', item.title, error);
-      }
-      return item;
-    })
-  );
-
-  // Enhanced filtering with better content quality checks
-  const filteredContent = enhancedContent
-    .filter(item => {
-      // Base educational filter
-      if (item.isEducational === false) {
-        console.log(`Filtered out non-educational: ${item.title}`);
-        return false;
-      }
-      
-      // Relevance score filter
-      if ((item.relevanceScore || 0) < 30) {
-        console.log(`Filtered out low relevance (${item.relevanceScore}): ${item.title}`);
-        return false;
-      }
-      
-      // Duration-based quality filter for videos
-      if (item.contentType === 'video' && item.duration) {
-        const durationInSeconds = parseDurationToSeconds(item.duration);
-        // Filter out very short videos (less than 2 minutes for educational content)
-        if (durationInSeconds < 120) {
-          console.log(`Filtered out short video (${item.duration}): ${item.title}`);
-          return false;
-        }
-        // Also filter out extremely long videos (more than 2 hours) unless highly relevant
-        if (durationInSeconds > 7200 && (item.relevanceScore || 0) < 70) {
-          console.log(`Filtered out long video with low relevance: ${item.title}`);
-          return false;
-        }
-      }
-      
-      return true;
-    })
-    .sort((a, b) => {
-      // Sort by relevance score, but give slight preference to longer educational videos
-      let scoreA = a.relevanceScore || 0;
-      let scoreB = b.relevanceScore || 0;
-      
-      if (a.contentType === 'video' && a.duration) {
-        const durationA = parseDurationToSeconds(a.duration);
-        if (durationA >= 300 && durationA <= 3600) { // 5 minutes to 1 hour sweet spot
-          scoreA += 5;
-        }
-      }
-      
-      if (b.contentType === 'video' && b.duration) {
-        const durationB = parseDurationToSeconds(b.duration);
-        if (durationB >= 300 && durationB <= 3600) {
-          scoreB += 5;
-        }
-      }
-      
-      return scoreB - scoreA;
-    });
-
-  console.log(`Filtered down to ${filteredContent.length} high-quality items`);
-
-  // Redistribute back to categories
-  return {
-    videos: filteredContent.filter(item => item.contentType === 'video'),
-    websites: filteredContent.filter(item => item.contentType === 'website'),
-    blogs: filteredContent.filter(item => item.contentType === 'blog')
-  };
+  const hours = parseInt(match[1] || '0');
+  const minutes = parseInt(match[2] || '0');
+  const seconds = parseInt(match[3] || '0');
+  
+  return hours * 3600 + minutes * 60 + seconds;
 }
 
-function parseDurationToSeconds(duration: string): number {
-  if (!duration) return 0;
-  
-  // Handle formats like "15:32" or "1:23:45"
-  const parts = duration.split(':').map(part => parseInt(part));
-  if (parts.length === 2) {
-    return parts[0] * 60 + parts[1]; // minutes:seconds
-  } else if (parts.length === 3) {
-    return parts[0] * 3600 + parts[1] * 60 + parts[2]; // hours:minutes:seconds
-  }
-  
-  return 0;
-}
-
-async function checkCache(query: string) {
-  try {
-    const { data, error } = await supabase
-      .from('search_cache')
-      .select('results')
-      .eq('query', query.toLowerCase())
-      .gt('expires_at', new Date().toISOString())
-      .single();
-
-    if (error || !data) {
-      return null;
-    }
-
-    return data.results;
-  } catch (error) {
-    console.error('Cache check error:', error);
-    return null;
-  }
-}
-
-async function storeResultsInCache(query: string, results: any) {
-  try {
-    await supabase
-      .from('search_cache')
-      .insert({
-        query: query.toLowerCase(),
-        content_type: 'mixed',
-        results: results
-      });
-  } catch (error) {
-    console.error('Cache insert error:', error);
-  }
-}
-
-async function fetchYouTubeVideos(query: string): Promise<ContentItem[]> {
-  const youtubeApiKey = Deno.env.get('YOUTUBE_API_KEY');
-  
-  if (!youtubeApiKey) {
-    console.error('YouTube API key not configured');
-    return getMockVideos(query);
-  }
-  
-  try {
-    console.log('Fetching YouTube videos');
-    // First, search for videos with more specific educational keywords
-    const searchResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(query + ' tutorial educational learning course explained')}&type=video&maxResults=15&order=relevance&videoDuration=medium&key=${youtubeApiKey}`
-    );
-
-    if (!searchResponse.ok) {
-      console.error(`YouTube API error: ${searchResponse.status}`);
-      throw new Error(`YouTube API error: ${searchResponse.status}`);
-    }
-
-    const searchData = await searchResponse.json();
-    
-    if (!searchData.items || searchData.items.length === 0) {
-      console.log('No YouTube videos found, returning mock data');
-      return getMockVideos(query);
-    }
-
-    console.log(`Found ${searchData.items.length} YouTube videos`);
-
-    // Get video IDs for statistics
-    const videoIds = searchData.items.map((item: any) => item.id.videoId).join(',');
-    
-    // Fetch video statistics
-    const statsResponse = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=statistics,contentDetails&id=${videoIds}&key=${youtubeApiKey}`
-    );
-
-    const statsData = statsResponse.ok ? await statsResponse.json() : null;
-    const statsMap = new Map();
-    
-    if (statsData && statsData.items) {
-      statsData.items.forEach((item: any) => {
-        statsMap.set(item.id, {
-          viewCount: parseInt(item.statistics.viewCount || '0'),
-          likeCount: parseInt(item.statistics.likeCount || '0'),
-          duration: item.contentDetails.duration
-        });
-      });
-    }
-
-    return searchData.items
-      .map((item: any) => {
-        const stats = statsMap.get(item.id.videoId);
-        const duration = formatDuration(stats?.duration);
-        
-        return {
-          title: item.snippet.title,
-          url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
-          content_type: 'video' as const,
-          thumbnail_url: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.medium?.url,
-          author: item.snippet.channelTitle,
-          source: 'YouTube',
-          publish_date: item.snippet.publishedAt,
-          duration: duration,
-          metadata: {
-            videoId: item.id.videoId,
-            channelId: item.snippet.channelId,
-            viewCount: stats?.viewCount || 0,
-            likeCount: stats?.likeCount || 0
-          }
-        };
-      })
-      .filter((video: any) => {
-        // Pre-filter very short videos
-        if (video.duration) {
-          const durationInSeconds = parseDurationToSeconds(video.duration);
-          return durationInSeconds >= 120; // At least 2 minutes
-        }
-        return true;
-      })
-      .sort((a: any, b: any) => (b.metadata.viewCount + b.metadata.likeCount) - (a.metadata.viewCount + a.metadata.likeCount))
-      .slice(0, 8);
-
-  } catch (error) {
-    console.error('YouTube fetch error:', error);
-    return getMockVideos(query);
-  }
-}
-
-function formatDuration(duration: string): string {
-  if (!duration) return '';
-  
-  const match = duration.match(/PT(\d+H)?(\d+M)?(\d+S)?/);
-  if (!match) return '';
-  
-  const hours = parseInt(match[1]?.replace('H', '') || '0');
-  const minutes = parseInt(match[2]?.replace('M', '') || '0');
-  const seconds = parseInt(match[3]?.replace('S', '') || '0');
+function formatDuration(seconds: number): string {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const remainingSeconds = seconds % 60;
   
   if (hours > 0) {
-    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+  } else {
+    return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
   }
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-}
-
-async function fetchBlogArticles(query: string): Promise<ContentItem[]> {
-  // Return authentic educational blog sources
-  const blogs = [
-    {
-      title: `${query} - Complete Guide and Tutorial`,
-      url: `https://www.freecodecamp.org/news/search/?query=${encodeURIComponent(query)}`,
-      content_type: 'blog' as const,
-      author: 'freeCodeCamp',
-      source: 'freeCodeCamp',
-      publish_date: new Date().toISOString(),
-      summary: `Comprehensive guide to ${query} with practical examples and step-by-step tutorials.`,
-      metadata: { readTime: '12 min read', difficulty: 'intermediate' }
-    },
-    {
-      title: `Learning ${query}: Best Practices and Tips`,
-      url: `https://dev.to/search?q=${encodeURIComponent(query)}`,
-      content_type: 'blog' as const,
-      author: 'Dev.to Community',
-      source: 'Dev.to',
-      publish_date: new Date().toISOString(),
-      summary: `Community-driven insights and best practices for mastering ${query}.`,
-      metadata: { readTime: '8 min read', difficulty: 'beginner' }
-    },
-    {
-      title: `${query} Explained: From Basics to Advanced`,
-      url: `https://medium.com/search?q=${encodeURIComponent(query)}`,
-      content_type: 'blog' as const,
-      author: 'Medium Writers',
-      source: 'Medium',
-      publish_date: new Date().toISOString(),
-      summary: `In-depth articles covering ${query} concepts from fundamental to advanced level.`,
-      metadata: { readTime: '10 min read', difficulty: 'intermediate' }
-    }
-  ];
-
-  return blogs;
-}
-
-async function fetchWebsiteContent(query: string): Promise<ContentItem[]> {
-  // Return authentic educational website sources
-  const websites = [
-    {
-      title: `${query} - Khan Academy`,
-      url: `https://www.khanacademy.org/search?referer=%2F&page_search_query=${encodeURIComponent(query)}`,
-      content_type: 'website' as const,
-      author: 'Khan Academy',
-      source: 'Khan Academy',
-      summary: `Interactive lessons and exercises to learn ${query} concepts through practice.`,
-      metadata: { type: 'Interactive Course', difficulty: 'beginner' }
-    },
-    {
-      title: `${query} Documentation and Tutorials`,
-      url: `https://www.w3schools.com/default.asp`,
-      content_type: 'website' as const,
-      author: 'W3Schools',
-      source: 'W3Schools',
-      summary: `Comprehensive tutorials and references for ${query} with live examples.`,
-      metadata: { type: 'Tutorial', difficulty: 'beginner' }
-    },
-    {
-      title: `${query} - Coursera Online Courses`,
-      url: `https://www.coursera.org/search?query=${encodeURIComponent(query)}`,
-      content_type: 'website' as const,
-      author: 'Coursera',
-      source: 'Coursera',
-      summary: `Professional courses and specializations in ${query} from top universities and companies.`,
-      metadata: { type: 'Course', difficulty: 'intermediate' }
-    },
-    {
-      title: `${query} - edX Courses`,
-      url: `https://www.edx.org/search?q=${encodeURIComponent(query)}`,
-      content_type: 'website' as const,
-      author: 'edX',
-      source: 'edX',
-      summary: `University-level courses in ${query} from leading institutions worldwide.`,
-      metadata: { type: 'Course', difficulty: 'advanced' }
-    }
-  ];
-
-  return websites;
-}
-
-function getMockVideos(query: string): ContentItem[] {
-  return [
-    {
-      title: `Complete ${query} Tutorial for Beginners`,
-      url: `https://youtube.com/watch?v=dQw4w9WgXcQ`,
-      content_type: 'video',
-      summary: `A comprehensive overview of ${query} concepts and practical applications. Perfect for beginners starting their learning journey.`,
-      thumbnail_url: '/placeholder.svg',
-      author: 'Education Pro',
-      duration: '15:32',
-      source: 'YouTube',
-      metadata: { videoId: 'dQw4w9WgXcQ' }
-    }
-  ];
 }

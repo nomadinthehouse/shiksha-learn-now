@@ -11,9 +11,10 @@ import { Chrome, Mail, Phone } from 'lucide-react';
 interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
+  message?: string;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, message }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -105,6 +106,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <DialogTitle className="text-center text-2xl font-bold">
             {isLogin ? 'Welcome Back' : 'Create Account'}
           </DialogTitle>
+          {message && (
+            <p className="text-center text-sm text-gray-600 mt-2">{message}</p>
+          )}
         </DialogHeader>
 
         {error && (
