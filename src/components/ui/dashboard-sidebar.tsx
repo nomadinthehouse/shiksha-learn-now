@@ -3,7 +3,7 @@ import React from 'react';
 import { Card } from '@/components/ui/card';
 import { ProgressTracker } from './progress-tracker';
 import { LearningPath } from './learning-path';
-import { NotesPanel } from './notes-panel';
+import { EnhancedNotesPanel } from './notes/enhanced-notes-panel';
 
 interface DashboardSidebarProps {
   currentTopic?: string;
@@ -20,7 +20,7 @@ export const DashboardSidebar: React.FC<DashboardSidebarProps> = ({
     <div className="space-y-6">
       <LearningPath currentTopic={currentTopic} onTopicSelect={onTopicSelect} />
       <ProgressTracker />
-      <NotesPanel currentTopic={currentTopic} contentUrl={contentUrl} />
+      <EnhancedNotesPanel currentTopic={currentTopic} contentUrl={contentUrl} />
     </div>
   );
 };
