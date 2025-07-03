@@ -32,7 +32,7 @@ interface UserProfile {
 }
 
 const Profile: React.FC = () => {
-  const { user, signOut } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const { showSuccess, showError } = useCustomToast();
   const navigate = useNavigate();
   
@@ -47,6 +47,13 @@ const Profile: React.FC = () => {
     confirmPassword: ''
   });
 
+  // Redirect to home if not authenticated
+  useEffect(() => {
+    if (!authLoading && !user) {
+      navigate('/');
+    }
+  }, [user, authLoading, navigate]);
+
   useEffect(() => {
     if (user) {
       fetchProfile();
@@ -55,34 +62,59 @@ const Profile: React.FC = () => {
   }, [user]);
 
   const fetchProfile = async () => {
+    if (!user) return;
+    
     try {
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', user!.id)
+        .eq('id', user.id)
         .single();
 
-      if (error) throw error;
-      setProfile(data);
-      setFormData(prev => ({ ...prev, fullName: data.full_name || '' }));
+      if (error) {
+        // If profile doesn't exist, create one
+        if (error.code === 'PGRST116') {
+          const { data: newProfile, error: createError } = await supabase
+            .from('profiles')
+            .insert({
+              id: user.id,
+              email: user.email,
+              full_name: user.user_metadata?.full_name || ''
+            })
+            .select()
+            .single();
+
+          if (createError) throw createError;
+          setProfile(newProfile);
+          setFormData(prev => ({ ...prev, fullName: newProfile.full_name || '' }));
+        } else {
+          throw error;
+        }
+      } else {
+        setProfile(data);
+        setFormData(prev => ({ ...prev, fullName: data.full_name || '' }));
+      }
     } catch (error) {
       console.error('Error fetching profile:', error);
+      showError('Failed to load profile data');
     }
   };
 
   const fetchProgress = async () => {
+    if (!user) return;
+    
     try {
       // Fetch both user_progress and content_tracking data
       const [progressResponse, trackingResponse] = await Promise.all([
         supabase
           .from('user_progress')
           .select('*')
-          .eq('user_id', user!.id)
+          .eq('user_id', user.id)
           .order('updated_at', { ascending: false }),
         supabase
           .from('content_tracking')
           .select('*')
-          .eq('user_id', user!.id)
+          .eq('user_id', user.id)
           .order('last_watched_at', { ascending: false })
       ]);
 
@@ -97,10 +129,10 @@ const Profile: React.FC = () => {
           content_url: tracking.content_url,
           content_type: tracking.content_type,
           status: tracking.is_completed ? 'completed' : 'in_progress',
-          completion_percentage: tracking.completion_percentage,
-          time_spent: tracking.watch_time,
+          completion_percentage: tracking.completion_percentage || 0,
+          time_spent: tracking.watch_time || 0,
           created_at: tracking.created_at,
-          updated_at: tracking.last_watched_at
+          updated_at: tracking.last_watched_at || tracking.updated_at
         }))
       ];
 
@@ -112,12 +144,15 @@ const Profile: React.FC = () => {
       setProgress(uniqueProgress);
     } catch (error) {
       console.error('Error fetching progress:', error);
+      showError('Failed to load progress data');
     } finally {
       setLoading(false);
     }
   };
 
   const updateProfile = async () => {
+    if (!user) return;
+    
     if (!formData.fullName.trim()) {
       showError('Please enter your full name');
       return;
@@ -128,7 +163,7 @@ const Profile: React.FC = () => {
       const { error } = await supabase
         .from('profiles')
         .update({ full_name: formData.fullName })
-        .eq('id', user!.id);
+        .eq('id', user.id);
 
       if (error) throw error;
       
@@ -195,6 +230,20 @@ const Profile: React.FC = () => {
     if (hours > 0) return `${hours}h ${minutes % 60}m`;
     return `${minutes}m`;
   };
+
+  // Show loading while auth is loading
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
+  // Don't render anything if user is not authenticated (will redirect)
+  if (!user) {
+    return null;
+  }
 
   if (loading) {
     return (
@@ -269,7 +318,7 @@ const Profile: React.FC = () => {
                       Email Address
                     </label>
                     <Input
-                      value={profile?.email || ''}
+                      value={user.email || ''}
                       disabled
                       className="bg-gray-50"
                     />
