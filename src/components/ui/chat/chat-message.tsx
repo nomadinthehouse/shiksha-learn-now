@@ -1,13 +1,7 @@
 import React from 'react';
 import { User, Bot } from 'lucide-react';
 import DOMPurify from 'dompurify';
-
-interface Message {
-  id: string;
-  text: string;
-  isUser: boolean;
-  timestamp: Date;
-}
+import { Message } from './types';
 
 interface ChatMessageProps {
   message: Message;
