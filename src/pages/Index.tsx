@@ -15,6 +15,7 @@ import { LearningLevelModal } from "@/components/ui/learning-level-modal";
 import { DashboardSidebar } from "@/components/ui/dashboard-sidebar";
 import { MobileHeader } from "@/components/ui/mobile-header";
 import { RecommendationsSection } from "@/components/ui/recommendations-section";
+import { ContentTracker } from "@/components/ui/content-tracker";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useNavigate } from "react-router-dom";
 
@@ -357,6 +358,33 @@ const IndexContent = () => {
             {/* Search Results */}
             {searchResults && (
               <div className="space-y-8 md:space-y-12">
+                {/* Content Tracker */}
+                {user && (
+                  <ContentTracker 
+                    topic={searchQuery} 
+                    items={[
+                      ...(searchResults.videos || []).map((video: any) => ({
+                        url: video.url,
+                        title: video.title,
+                        content_type: 'video',
+                        duration: video.duration
+                      })),
+                      ...(searchResults.websites || []).map((website: any) => ({
+                        url: website.url,
+                        title: website.title,
+                        content_type: 'website',
+                        duration: website.duration
+                      })),
+                      ...(searchResults.blogs || []).map((blog: any) => ({
+                        url: blog.url,
+                        title: blog.title,
+                        content_type: 'blog',
+                        duration: blog.duration
+                      }))
+                    ]}
+                  />
+                )}
+
                 {/* Videos Section */}
                 {searchResults.videos && searchResults.videos.length > 0 && (
                   <section>

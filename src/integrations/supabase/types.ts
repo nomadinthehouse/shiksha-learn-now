@@ -54,6 +54,51 @@ export type Database = {
         }
         Relationships: []
       }
+      content_tracking: {
+        Row: {
+          completion_percentage: number | null
+          content_type: string
+          content_url: string
+          created_at: string
+          id: string
+          is_completed: boolean | null
+          last_watched_at: string | null
+          topic: string
+          total_duration: number | null
+          updated_at: string
+          user_id: string
+          watch_time: number | null
+        }
+        Insert: {
+          completion_percentage?: number | null
+          content_type: string
+          content_url: string
+          created_at?: string
+          id?: string
+          is_completed?: boolean | null
+          last_watched_at?: string | null
+          topic: string
+          total_duration?: number | null
+          updated_at?: string
+          user_id: string
+          watch_time?: number | null
+        }
+        Update: {
+          completion_percentage?: number | null
+          content_type?: string
+          content_url?: string
+          created_at?: string
+          id?: string
+          is_completed?: boolean | null
+          last_watched_at?: string | null
+          topic?: string
+          total_duration?: number | null
+          updated_at?: string
+          user_id?: string
+          watch_time?: number | null
+        }
+        Relationships: []
+      }
       learning_paths: {
         Row: {
           created_at: string

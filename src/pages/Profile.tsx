@@ -72,14 +72,44 @@ const Profile: React.FC = () => {
 
   const fetchProgress = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_progress')
-        .select('*')
-        .eq('user_id', user!.id)
-        .order('updated_at', { ascending: false });
+      // Fetch both user_progress and content_tracking data
+      const [progressResponse, trackingResponse] = await Promise.all([
+        supabase
+          .from('user_progress')
+          .select('*')
+          .eq('user_id', user!.id)
+          .order('updated_at', { ascending: false }),
+        supabase
+          .from('content_tracking')
+          .select('*')
+          .eq('user_id', user!.id)
+          .order('last_watched_at', { ascending: false })
+      ]);
 
-      if (error) throw error;
-      setProgress(data || []);
+      if (progressResponse.error) throw progressResponse.error;
+      
+      // Combine data from both tables for a comprehensive view
+      const combinedProgress = [
+        ...(progressResponse.data || []),
+        ...(trackingResponse.data || []).map(tracking => ({
+          id: tracking.id,
+          topic: tracking.topic,
+          content_url: tracking.content_url,
+          content_type: tracking.content_type,
+          status: tracking.is_completed ? 'completed' : 'in_progress',
+          completion_percentage: tracking.completion_percentage,
+          time_spent: tracking.watch_time,
+          created_at: tracking.created_at,
+          updated_at: tracking.last_watched_at
+        }))
+      ];
+
+      // Remove duplicates based on content_url
+      const uniqueProgress = combinedProgress.filter((item, index, self) => 
+        index === self.findIndex(t => t.content_url === item.content_url)
+      );
+
+      setProgress(uniqueProgress);
     } catch (error) {
       console.error('Error fetching progress:', error);
     } finally {
