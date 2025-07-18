@@ -1,5 +1,5 @@
 
-import { Search, Play, FileText, Globe, Clock, User, Star, LogOut } from "lucide-react";
+import { Search, Play, FileText, Globe, Clock, User, Star, LogOut, History } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import { DashboardSidebar } from "@/components/ui/dashboard-sidebar";
 import { MobileHeader } from "@/components/ui/mobile-header";
 import { RecommendationsSection } from "@/components/ui/recommendations-section";
 import { ContentTracker } from "@/components/ui/content-tracker";
+import { SearchHistory } from "@/components/ui/search-history";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useNavigate } from "react-router-dom";
 
@@ -33,11 +34,34 @@ const IndexContent = () => {
     title: ''
   });
   const [showSidebar, setShowSidebar] = useState(false);
+  const [showSearchHistory, setShowSearchHistory] = useState(false);
   
   const { showSuccess, showError } = useCustomToast();
   const { user, loading, signOut } = useAuth();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+
+  // Helper function to parse duration strings to seconds
+  const parseDurationToSeconds = (duration: string): number => {
+    if (!duration) return 0;
+    
+    // Handle formats like "5:30", "1:05:30", "10 min read", etc.
+    if (duration.includes('min read')) {
+      const minutes = parseInt(duration.split(' ')[0]);
+      return minutes * 60;
+    }
+    
+    const parts = duration.split(':');
+    if (parts.length === 2) {
+      // MM:SS format
+      return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+    } else if (parts.length === 3) {
+      // HH:MM:SS format
+      return parseInt(parts[0]) * 3600 + parseInt(parts[1]) * 60 + parseInt(parts[2]);
+    }
+    
+    return 0;
+  };
 
   const handleSearch = async (level?: 'beginner' | 'intermediate' | 'advanced') => {
     if (!searchQuery.trim()) {
@@ -70,12 +94,32 @@ const IndexContent = () => {
     }
   };
 
-  const handleSearchClick = () => {
+  const handleSearchClick = async () => {
     if (!searchQuery.trim()) {
       showError("Please enter a search query to find educational content.");
       return;
     }
-    setShowLearningLevelModal(true);
+
+    // Check if level selection is needed
+    try {
+      const { data, error } = await supabase.functions.invoke('check-content-availability', {
+        body: { query: searchQuery }
+      });
+
+      if (error) throw error;
+
+      if (data.needsLevelSelection) {
+        setShowLearningLevelModal(true);
+      } else {
+        // Skip level selection and search with default level
+        setLearningLevel(data.defaultLevel);
+        handleSearch(data.defaultLevel);
+      }
+    } catch (error) {
+      console.error('Error checking content availability:', error);
+      // Fallback to showing level modal
+      setShowLearningLevelModal(true);
+    }
   };
 
   const handleLearningLevelSelect = (level: 'beginner' | 'intermediate' | 'advanced') => {
@@ -96,8 +140,11 @@ const IndexContent = () => {
       return;
     }
 
-    // Track user progress
+    // Track user progress and content tracking
     try {
+      // Parse duration to seconds for storage
+      const durationInSeconds = item.duration ? parseDurationToSeconds(item.duration) : 0;
+
       await supabase
         .from('user_progress')
         .upsert({
@@ -112,16 +159,34 @@ const IndexContent = () => {
           onConflict: 'user_id,content_url'
         });
 
-      // Track search history
+      // Track content for duration calculations
+      await supabase
+        .from('content_tracking')
+        .upsert({
+          user_id: user.id,
+          content_url: url,
+          content_type: item.content_type || 'website',
+          topic: searchQuery.toLowerCase(),
+          total_duration: durationInSeconds,
+          watch_time: 0,
+          completion_percentage: 0,
+          is_completed: false
+        }, {
+          onConflict: 'user_id,content_url'
+        });
+
+      // Track search history (avoid duplicates)
       await supabase
         .from('search_history')
-        .insert({
+        .upsert({
           user_id: user.id,
           query: searchQuery,
           learning_level: learningLevel,
           results_count: (searchResults?.videos?.length || 0) + 
                         (searchResults?.websites?.length || 0) + 
                         (searchResults?.blogs?.length || 0)
+        }, {
+          onConflict: 'user_id,query,learning_level'
         });
     } catch (error) {
       console.error('Error tracking progress:', error);
@@ -141,9 +206,14 @@ const IndexContent = () => {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const handleTopicSelect = (topic: string) => {
+  const handleTopicSelect = (topic: string, level?: 'beginner' | 'intermediate' | 'advanced') => {
     setSearchQuery(topic);
-    setShowLearningLevelModal(true);
+    if (level) {
+      setLearningLevel(level);
+      handleSearch(level);
+    } else {
+      setShowLearningLevelModal(true);
+    }
   };
 
   const handleAuthRequired = () => {
@@ -285,6 +355,15 @@ const IndexContent = () => {
                     <Button 
                       variant="outline" 
                       size="sm"
+                      onClick={() => setShowSearchHistory(!showSearchHistory)}
+                      className="hidden md:flex"
+                    >
+                      <History className="h-4 w-4 mr-2" />
+                      History
+                    </Button>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
                       onClick={() => navigate('/profile')}
                       className="hidden md:flex"
                     >
@@ -316,6 +395,16 @@ const IndexContent = () => {
 
       <div className="max-w-7xl mx-auto px-4 py-4 md:py-8">
         <div className="flex flex-col lg:flex-row gap-4 lg:gap-8">
+          {/* Search History Sidebar */}
+          {showSearchHistory && user && (
+            <div className="lg:w-80">
+              <SearchHistory 
+                onTopicSelect={handleTopicSelect}
+                onClose={() => setShowSearchHistory(false)}
+              />
+            </div>
+          )}
+
           {/* Main Content */}
           <div className="flex-1">
             {/* Search Section */}
@@ -455,8 +544,8 @@ const IndexContent = () => {
             )}
           </div>
 
-          {/* Sidebar - only show when user is logged in, has searched, and not on mobile */}
-          {user && searchResults && !isMobile && (
+          {/* Sidebar - only show when user is logged in, has searched, not on mobile, and not showing search history */}
+          {user && searchResults && !isMobile && !showSearchHistory && (
             <div className="w-80 flex-shrink-0">
               <DashboardSidebar 
                 currentTopic={searchQuery}
