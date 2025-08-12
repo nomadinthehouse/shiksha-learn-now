@@ -1,8 +1,14 @@
 
 import { corsHeaders } from '../_shared/cors.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 const YOUTUBE_API_KEY = Deno.env.get('YOUTUBE_API_KEY');
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
+
+const supabase = createClient(
+  Deno.env.get('SUPABASE_URL') || '',
+  Deno.env.get('SUPABASE_ANON_KEY') || ''
+);
 
 interface SearchRequest {
   query: string;
@@ -40,6 +46,29 @@ Deno.serve(async (req) => {
     };
 
     const enhancedQuery = `${query} ${levelKeywords[learningLevel]}`;
+    const normalizedQuery = query.toLowerCase();
+    const cacheKey = `search:${learningLevel}`;
+
+    // Return cached results quickly if available
+    try {
+      const { data: cached } = await supabase
+        .from('search_cache')
+        .select('results, created_at')
+        .eq('query', normalizedQuery)
+        .eq('content_type', cacheKey)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (cached?.results) {
+        console.log('Returning cached search results');
+        return new Response(JSON.stringify(cached.results), {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+        });
+      }
+    } catch (e) {
+      console.warn('Cache lookup failed, continuing without cache', e);
+    }
 
     // Search YouTube videos
     let videos = [];
@@ -47,7 +76,7 @@ Deno.serve(async (req) => {
       try {
         console.log('Searching YouTube videos...');
         const youtubeResponse = await fetch(
-          `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(enhancedQuery)}&type=video&maxResults=15&order=relevance&videoDuration=medium&key=${YOUTUBE_API_KEY}`
+          `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(enhancedQuery)}&type=video&maxResults=12&order=relevance&videoDuration=medium&key=${YOUTUBE_API_KEY}`
         );
         
         if (youtubeResponse.ok) {
@@ -55,12 +84,11 @@ Deno.serve(async (req) => {
           console.log(`Found ${youtubeData.items?.length || 0} YouTube videos`);
 
           // Get video details for duration filtering
-          const videoIds = youtubeData.items?.map((item: any) => item.id.videoId).join(',');
+          const videoIds = (youtubeData.items || []).map((item: any) => item.id.videoId).join(',');
           if (videoIds) {
             const detailsResponse = await fetch(
               `https://www.googleapis.com/youtube/v3/videos?part=contentDetails,statistics&id=${videoIds}&key=${YOUTUBE_API_KEY}`
             );
-            
             const detailsData = await detailsResponse.json();
             const videoDetails = new Map();
             detailsData.items?.forEach((item: any) => {
@@ -70,59 +98,67 @@ Deno.serve(async (req) => {
               });
             });
 
-            for (const item of youtubeData.items || []) {
-              const details = videoDetails.get(item.id.videoId);
-              const duration = parseDuration(details?.duration || 'PT0S');
-              
-              // Filter based on learning level and duration
-              const minDuration = learningLevel === 'beginner' ? 300 : learningLevel === 'intermediate' ? 600 : 900; // 5, 10, 15 minutes
-              
-              if (duration >= minDuration && duration <= 3600) { // Max 1 hour
-                try {
-                  console.log(`Processing video: ${item.snippet.title}`);
-                  const summaryResponse = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-summary`, {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`
-                    },
-                    body: JSON.stringify({
-                      title: item.snippet.title,
-                      description: item.snippet.description,
-                      query: enhancedQuery,
-                      contentType: 'video',
-                      duration: formatDuration(duration),
-                      learningLevel
-                    })
-                  });
+            const minDuration = learningLevel === 'beginner' ? 300 : learningLevel === 'intermediate' ? 600 : 900; // 5,10,15 min
 
-                  if (summaryResponse.ok) {
-                    const summary = await summaryResponse.json();
-                    
-                    // Apply stricter filtering based on learning level
-                    const minScore = learningLevel === 'beginner' ? 60 : learningLevel === 'intermediate' ? 65 : 70;
-                    
-                    if (summary.isEducational && summary.relevanceScore >= minScore) {
-                      videos.push({
-                        title: item.snippet.title,
-                        url: `https://www.youtube.com/watch?v=${item.id.videoId}`,
-                        author: item.snippet.channelTitle,
-                        duration: formatDuration(duration),
-                        summary: summary.summary,
-                        relevanceScore: summary.relevanceScore,
-                        learningTopics: summary.learningTopics,
-                        source: 'YouTube',
-                        content_type: 'video',
-                        metadata: {
-                          videoId: item.id.videoId,
-                          viewCount: details?.viewCount || 0,
-                          learningLevel
-                        }
-                      });
+            // Build candidate list with durations and sort by popularity
+            const candidates = (youtubeData.items || [])
+              .map((item: any) => {
+                const details = videoDetails.get(item.id.videoId);
+                const durationSec = parseDuration(details?.duration || 'PT0S');
+                return { item, details, durationSec };
+              })
+              .filter(({ durationSec }) => durationSec >= minDuration && durationSec <= 3600)
+              .sort((a, b) => (b.details?.viewCount || 0) - (a.details?.viewCount || 0))
+              .slice(0, 8);
+
+            // Run summaries concurrently for top candidates
+            const summaryPromises = candidates.map(({ item, details, durationSec }) =>
+              fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/generate-summary`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${Deno.env.get('SUPABASE_ANON_KEY')}`
+                },
+                body: JSON.stringify({
+                  title: item.snippet.title,
+                  description: item.snippet.description,
+                  query: enhancedQuery,
+                  contentType: 'video',
+                  duration: formatDuration(durationSec),
+                  learningLevel
+                })
+              }).then(async (res) => ({
+                ok: res.ok,
+                data: await res.json(),
+                item,
+                details,
+                durationSec
+              })).catch((e) => ({ ok: false, error: e }))
+            );
+
+            const results = await Promise.allSettled(summaryPromises);
+            const minScore = learningLevel === 'beginner' ? 60 : learningLevel === 'intermediate' ? 65 : 70;
+
+            for (const r of results) {
+              if (r.status === 'fulfilled' && r.value.ok) {
+                const summary = r.value.data;
+                if (summary.isEducational && summary.relevanceScore >= minScore) {
+                  videos.push({
+                    title: r.value.item.snippet.title,
+                    url: `https://www.youtube.com/watch?v=${r.value.item.id.videoId}`,
+                    author: r.value.item.snippet.channelTitle,
+                    duration: formatDuration(r.value.durationSec),
+                    summary: summary.summary,
+                    relevanceScore: summary.relevanceScore,
+                    learningTopics: summary.learningTopics,
+                    source: 'YouTube',
+                    content_type: 'video',
+                    metadata: {
+                      videoId: r.value.item.id.videoId,
+                      viewCount: r.value.details?.viewCount || 0,
+                      learningLevel
                     }
-                  }
-                } catch (error) {
-                  console.error('Error processing video:', error);
+                  });
                 }
               }
             }
@@ -182,14 +218,27 @@ Deno.serve(async (req) => {
 
     console.log(`Returning ${videos.length} videos, ${websites.length} websites, ${blogs.length} blogs`);
 
+    const payload = {
+      videos: videos.sort((a, b) => b.relevanceScore - a.relevanceScore),
+      websites,
+      blogs,
+      totalResults: videos.length + websites.length + blogs.length,
+      learningLevel
+    };
+
+    // Cache the results for faster subsequent loads
+    try {
+      await supabase.from('search_cache').insert({
+        query: normalizedQuery,
+        content_type: cacheKey,
+        results: payload
+      });
+    } catch (e) {
+      console.warn('Cache insert failed (non-blocking):', e);
+    }
+
     return new Response(
-      JSON.stringify({
-        videos: videos.sort((a, b) => b.relevanceScore - a.relevanceScore),
-        websites,
-        blogs,
-        totalResults: videos.length + websites.length + blogs.length,
-        learningLevel
-      }),
+      JSON.stringify(payload),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
