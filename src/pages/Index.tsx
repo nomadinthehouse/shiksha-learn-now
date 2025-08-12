@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { supabase } from "@/integrations/supabase/client";
 import { useCustomToast } from "@/hooks/use-toast-custom";
-import { AuthProvider, useAuth } from "@/components/auth/AuthContext";
+import { useAuth } from "@/components/auth/AuthContext";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { YoutubeModal } from "@/components/ui/youtube-modal";
 import { FloatingChat } from "@/components/ui/floating-chat";
@@ -86,6 +86,38 @@ const IndexContent = () => {
 
       setSearchResults(data);
       showSuccess(`Found educational content about "${searchQuery}" for ${level || learningLevel} level`);
+
+      // Save search history and summary for quick access later
+      try {
+        const totalCount = (data?.videos?.length || 0) + (data?.websites?.length || 0) + (data?.blogs?.length || 0);
+        let totalSeconds = 0;
+        (data?.videos || []).forEach((v: any) => { totalSeconds += parseDurationToSeconds(v.duration); });
+        (data?.websites || []).forEach((w: any) => { totalSeconds += parseDurationToSeconds(w.metadata?.readTime); });
+        (data?.blogs || []).forEach((b: any) => { totalSeconds += parseDurationToSeconds(b.metadata?.readTime); });
+
+        if (user) {
+          await supabase
+            .from('search_history')
+            .upsert({
+              user_id: user.id,
+              query: searchQuery,
+              learning_level: level || learningLevel,
+              results_count: totalCount
+            }, { onConflict: 'user_id,query,learning_level' });
+
+          await supabase
+            .from('user_search_summaries')
+            .upsert({
+              user_id: user.id,
+              query: searchQuery,
+              learning_level: level || learningLevel,
+              items_count: totalCount,
+              total_content_seconds: totalSeconds
+            }, { onConflict: 'user_id,query,learning_level' });
+        }
+      } catch (persistError) {
+        console.error('Error saving search summary:', persistError);
+      }
     } catch (error) {
       console.error('Search error:', error);
       showError("Search failed. Please try again later.");
@@ -588,12 +620,4 @@ const IndexContent = () => {
   );
 };
 
-const Index = () => {
-  return (
-    <AuthProvider>
-      <IndexContent />
-    </AuthProvider>
-  );
-};
-
-export default Index;
+export default IndexContent;

@@ -47,7 +47,18 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ onTopicSelect, onC
 
       if (historyError) throw historyError;
 
-      // Get content tracking for each search topic
+      // Fetch precomputed total content durations for each search
+      const { data: summaryData } = await supabase
+        .from('user_search_summaries')
+        .select('query, learning_level, total_content_seconds')
+        .eq('user_id', user.id);
+
+      const summaryMap = new Map<string, number>();
+      (summaryData || []).forEach((s: any) => {
+        summaryMap.set(`${s.query.toLowerCase()}|${s.learning_level}`, s.total_content_seconds || 0);
+      });
+
+      // Enrich with progress (completed duration) and total duration
       const historyWithDuration = await Promise.all(
         (historyData || []).map(async (item) => {
           const { data: contentData } = await supabase
@@ -56,14 +67,17 @@ export const SearchHistory: React.FC<SearchHistoryProps> = ({ onTopicSelect, onC
             .eq('user_id', user.id)
             .eq('topic', item.query.toLowerCase());
 
-          const totalDuration = contentData?.reduce((sum, content) => sum + (content.total_duration || 0), 0) || 0;
           const completedDuration = contentData?.reduce((sum, content) => sum + (content.watch_time || 0), 0) || 0;
+          const fallbackTotal = contentData?.reduce((sum, content) => sum + (content.total_duration || 0), 0) || 0;
+
+          const key = `${item.query.toLowerCase()}|${item.learning_level}`;
+          const totalDuration = summaryMap.get(key) ?? fallbackTotal;
 
           return {
             ...item,
             totalDuration,
             completedDuration
-          };
+          } as SearchHistoryItem;
         })
       );
 

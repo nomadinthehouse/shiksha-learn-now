@@ -58,21 +58,17 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Add mock content to ensure we always have some results
-    contentAvailability.beginner += 2; // Mock websites and blogs
-    contentAvailability.intermediate += 2;
-    contentAvailability.advanced += 2;
+    // Determine if level selection is needed based on actual variance
+    const counts = Object.values(contentAvailability);
+    const totalContent = counts.reduce((sum, count) => sum + count, 0);
+    const maxCount = Math.max(...counts);
+    const minCount = Math.min(...counts);
 
-    console.log('Content availability:', contentAvailability);
+    // If there's significant variance (e.g., some levels have content and others don't, or large differences), ask for selection
+    const significantVariance = (maxCount - minCount) >= 3 || (counts.some(c => c === 0) && counts.some(c => c > 0));
 
-    // Determine if level selection is needed
-    const totalContent = Object.values(contentAvailability).reduce((sum, count) => sum + count, 0);
-    const hasVariedContent = Object.values(contentAvailability).some(count => count > 0) && 
-                            Object.values(contentAvailability).some(count => count === 0) ||
-                            Math.max(...Object.values(contentAvailability)) - Math.min(...Object.values(contentAvailability)) > 2;
-
-    // If content is similar across levels or very basic topic, skip level selection
-    const needsLevelSelection = totalContent > 6 && hasVariedContent;
+    // If content is evenly distributed or essentially basic (very low total), skip level selection
+    const needsLevelSelection = totalContent > 0 && significantVariance;
 
     return new Response(
       JSON.stringify({
